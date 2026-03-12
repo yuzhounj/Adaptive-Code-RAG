@@ -1,5 +1,6 @@
 import subprocess
 import textwrap
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from src.data.schema import HumanEvalProblem
 
@@ -58,5 +59,10 @@ def batch_execute(
     generated_codes: list,
     timeout: int = 10,
 ) -> list:
-    """Execute multiple generated solutions, return list of rewards."""
-    return [execute_solution(problem, code, timeout=timeout) for code in generated_codes]
+    """Execute multiple generated solutions concurrently, return list of rewards."""
+    with ThreadPoolExecutor(max_workers=len(generated_codes)) as executor:
+        futures = [
+            executor.submit(execute_solution, problem, code, timeout)
+            for code in generated_codes
+        ]
+        return [f.result() for f in futures]

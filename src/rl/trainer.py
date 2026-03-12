@@ -50,35 +50,31 @@ class RLTrainer:
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
         """Run one training step on a batch of problems."""
+        # 1. Retrieve with gradient (fast, serial)
+        contexts = [self.retriever.retrieve(problem) for problem in batch]
+
+        # 2. Build all prompts and generate in parallel (main bottleneck → now concurrent)
+        prompts = [build_prompt(problem, ctx.snippets) for problem, ctx in zip(batch, contexts)]
+        all_generated_codes = self.llm_client.generate_batch(
+            prompts, n=self.config.generator.n_samples
+        )
+
+        # 3. Compute rewards and REINFORCE loss per problem
         batch_losses = []
         batch_rewards = []
         batch_advantages = []
 
-        for problem in batch:
-            # 1. Retrieve with gradient
-            context = self.retriever.retrieve(problem)
-            log_prob = self.retriever.compute_log_prob(context)  # scalar with grad
-
-            # 2. Build prompt and generate
-            prompt = build_prompt(problem, context.snippets)
-            generated_codes = self.llm_client.generate(
-                prompt, n=self.config.generator.n_samples
-            )
-
-            # 3. Compute rewards (no gradient)
+        for problem, context, generated_codes in zip(batch, contexts, all_generated_codes):
             rewards = self.reward_fn.compute(problem, generated_codes)
-
-            # 4. REINFORCE loss
             loss_output = self.policy.compute_loss(
                 log_probs=context.log_probs,
                 rewards=rewards,
             )
-
             batch_losses.append(loss_output.loss)
             batch_rewards.append(loss_output.raw_reward)
             batch_advantages.append(loss_output.advantage)
 
-        # 5. Aggregate and backprop
+        # 4. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -148,16 +144,15 @@ class RLTrainer:
 
     def evaluate(self, problems: List[HumanEvalProblem]) -> dict:
         """Evaluate pass@k on eval set."""
-        all_rewards = []
-
-        for problem in tqdm(problems, desc="Evaluating", leave=False):
-            context = self.retriever.retrieve(problem)
-            prompt = build_prompt(problem, context.snippets)
-            generated_codes = self.llm_client.generate(
-                prompt, n=self.config.generator.n_samples
-            )
-            rewards = self.reward_fn.compute(problem, generated_codes)
-            all_rewards.append(rewards)
+        contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Evaluating", leave=False)]
+        prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
+        all_generated_codes = self.llm_client.generate_batch(
+            prompts, n=self.config.generator.n_samples
+        )
+        all_rewards = [
+            self.reward_fn.compute(p, codes)
+            for p, codes in zip(problems, all_generated_codes)
+        ]
 
         pass_at_1 = compute_pass_at_k(all_rewards, k=1)
         pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)

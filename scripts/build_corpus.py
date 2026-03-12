@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """One-shot script to encode HumanEval canonical solutions and build FAISS index."""
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import sys
 import argparse
 import torch
@@ -35,7 +37,12 @@ def main():
     save_corpus_metadata(snippets, config.data.corpus_dir)
 
     # Encode corpus
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
     print(f"Encoding corpus on {device}...")
     encoder = CodeBERTEncoder(
         model_name=config.retriever.model_name,
