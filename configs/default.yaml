@@ -1,0 +1,50 @@
+retriever:
+  model_name: "microsoft/codebert-base"
+  top_k: 5
+  max_seq_len: 512
+  embedding_dim: 768
+  index_refresh_interval: 50
+
+generator:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  n_samples: 4
+  temperature: 0.8
+  max_tokens: 512
+  timeout: 30
+
+reward:
+  mode: "execution"  # "execution", "llm_judge", "hybrid"
+  execution_timeout: 10
+  llm_judge_model: "gpt-4o-mini"
+  hybrid_execution_weight: 0.7
+
+rl:
+  learning_rate: 1.0e-5
+  batch_size: 8
+  max_steps: 5000
+  baseline_decay: 0.99
+  entropy_coeff: 0.01
+  max_grad_norm: 1.0
+  warmup_steps: 100
+  eval_interval: 200
+  checkpoint_interval: 500
+  log_interval: 10
+
+data:
+  train_split: 0.8
+  corpus_dataset: "code_search_net"
+  corpus_language: "python"
+  max_corpus_size: 180000
+  cache_dir: "data/cache"
+  corpus_dir: "data/corpus"
+  humaneval_dir: "data/humaneval"
+
+logging:
+  use_wandb: false
+  use_tensorboard: true
+  log_dir: "outputs/logs"
+  project_name: "adaptive-code-rag"
+
+output:
+  checkpoint_dir: "outputs/checkpoints"

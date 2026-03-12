@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""One-shot script to encode CodeSearchNet corpus and build FAISS index."""
+import sys
+import argparse
+import torch
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.config import load_config
+from src.data.humaneval_loader import load_humaneval
+from src.data.corpus_builder import load_codesearchnet_corpus, save_corpus_metadata
+from src.retriever.encoder import CodeBERTEncoder
+from src.retriever.faiss_index import FaissIndex
+import numpy as np
+from tqdm import tqdm
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Build CodeSearchNet corpus and FAISS index")
+    parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--max-size", type=int, default=None)
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+
+    # Load HumanEval to exclude canonical solutions
+    print("Loading HumanEval for decontamination...")
+    humaneval = load_humaneval(cache_dir=config.data.humaneval_dir)
+    excluded = {p.canonical_solution.strip() for p in humaneval}
+
+    # Load corpus
+    print("Loading CodeSearchNet corpus...")
+    max_size = args.max_size or config.data.max_corpus_size
+    snippets = load_codesearchnet_corpus(
+        language=config.data.corpus_language,
+        max_size=max_size,
+        cache_dir=config.data.cache_dir,
+        excluded_solutions=list(excluded),
+    )
+    print(f"Loaded {len(snippets)} snippets")
+
+    # Save corpus metadata
+    save_corpus_metadata(snippets, config.data.corpus_dir)
+
+    # Encode corpus
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Encoding corpus on {device}...")
+    encoder = CodeBERTEncoder(
+        model_name=config.retriever.model_name,
+        max_seq_len=config.retriever.max_seq_len,
+    ).to(device)
+    encoder.eval()
+
+    batch_size = 64
+    all_embeddings = []
+    texts = [f"{s.docstring} {s.code}"[:512] for s in snippets]
+
+    for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+        batch = texts[i:i + batch_size]
+        embs = encoder.encode_corpus_batch(batch, device=device)
+        all_embeddings.append(embs)
+
+    embeddings = np.concatenate(all_embeddings, axis=0).astype(np.float32)
+
+    # Build and save FAISS index
+    index = FaissIndex(embedding_dim=config.retriever.embedding_dim)
+    index.build(embeddings)
+
+    index_path = str(Path(config.data.corpus_dir) / "faiss.index")
+    index.save(index_path)
+
+    # Quick test query
+    print("\nTest query: 'sort a list of integers'")
+    test_texts = ["sort a list of integers"]
+    test_emb = encoder.encode_corpus_batch(test_texts, device=device)[0]
+    scores, indices = index.search(test_emb, top_k=3)
+    for score, idx in zip(scores, indices):
+        print(f"  Score={score:.4f}: {snippets[idx].docstring[:80]}")
+
+    print("\nDone! Corpus build complete.")
+
+
+if __name__ == "__main__":
+    main()
