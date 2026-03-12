@@ -1,34 +1,36 @@
 import asyncio
 import os
-from typing import List, Optional
-import openai
+from typing import List
+import litellm
 from src.config import GeneratorConfig
 
 
 class LLMClient:
-    """Async OpenAI client for code generation."""
+    """Multi-provider LLM client via litellm."""
 
     def __init__(self, config: GeneratorConfig):
         self.config = config
-        self.client = openai.AsyncOpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            timeout=config.timeout,
-        )
+        self._api_key = os.environ.get(config.api_key_env, "") or None
 
     async def generate_async(self, prompt: str, n: int = 1) -> List[str]:
-        """Generate n code completions asynchronously."""
+        """Generate n completions via n parallel calls for universal provider support."""
         try:
-            response = await self.client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert Python programmer. Complete the given function."},
-                    {"role": "user", "content": prompt},
-                ],
-                n=n,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
-            return [choice.message.content or "" for choice in response.choices]
+            tasks = [
+                litellm.acompletion(
+                    model=self.config.model,
+                    api_key=self._api_key,
+                    messages=[
+                        {"role": "system", "content": "You are an expert Python programmer. Complete the given function."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    timeout=self.config.timeout,
+                )
+                for _ in range(n)
+            ]
+            responses = await asyncio.gather(*tasks)
+            return [r.choices[0].message.content or "" for r in responses]
         except Exception as e:
             print(f"LLM generation error: {e}")
             return ["" for _ in range(n)]

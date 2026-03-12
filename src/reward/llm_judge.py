@@ -1,7 +1,7 @@
 import asyncio
 import os
 from typing import List
-import openai
+import litellm
 from src.config import RewardConfig
 from src.data.schema import HumanEvalProblem
 
@@ -31,10 +31,7 @@ class LLMJudge:
 
     def __init__(self, config: RewardConfig):
         self.config = config
-        self.client = openai.AsyncOpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            timeout=30,
-        )
+        self._api_key = os.environ.get(config.llm_judge_api_key_env, "") or None
 
     async def judge_async(self, problem: HumanEvalProblem, generated_code: str) -> float:
         """Get LLM quality score for generated code."""
@@ -43,8 +40,9 @@ class LLMJudge:
             generated_code=generated_code,
         )
         try:
-            response = await self.client.chat.completions.create(
+            response = await litellm.acompletion(
                 model=self.config.llm_judge_model,
+                api_key=self._api_key,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=10,

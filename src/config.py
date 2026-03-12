@@ -16,8 +16,8 @@ class RetrieverConfig:
 
 @dataclass
 class GeneratorConfig:
-    provider: str = "openai"
-    model: str = "gpt-4o-mini"
+    model: str = "openai/gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"
     n_samples: int = 4
     temperature: float = 0.8
     max_tokens: int = 512
@@ -28,7 +28,8 @@ class GeneratorConfig:
 class RewardConfig:
     mode: str = "execution"
     execution_timeout: int = 10
-    llm_judge_model: str = "gpt-4o-mini"
+    llm_judge_model: str = "openai/gpt-4o-mini"
+    llm_judge_api_key_env: str = "OPENAI_API_KEY"
     hybrid_execution_weight: float = 0.7
 
 

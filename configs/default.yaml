@@ -6,8 +6,8 @@ retriever:
   index_refresh_interval: 50
 
 generator:
-  provider: "openai"
-  model: "gpt-4o-mini"
+  model: "openai/gpt-4o-mini"   # format: provider/model-name
+  api_key_env: "OPENAI_API_KEY"  # litellm will read this env var
   n_samples: 4
   temperature: 0.8
   max_tokens: 512
@@ -16,7 +16,8 @@ generator:
 reward:
   mode: "execution"  # "execution", "llm_judge", "hybrid"
   execution_timeout: 10
-  llm_judge_model: "gpt-4o-mini"
+  llm_judge_model: "openai/gpt-4o-mini"
+  llm_judge_api_key_env: "OPENAI_API_KEY"
   hybrid_execution_weight: 0.7
 
 rl:
