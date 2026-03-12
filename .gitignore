@@ -10,4 +10,4 @@ build/
 wandb/
 *.log
 claude.md
-.idea
+.idea/
