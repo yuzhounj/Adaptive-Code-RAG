@@ -34,9 +34,6 @@ rl:
 
 data:
   train_split: 0.8
-  corpus_dataset: "code_search_net"
-  corpus_language: "python"
-  max_corpus_size: 180000
   cache_dir: "data/cache"
   corpus_dir: "data/corpus"
   humaneval_dir: "data/humaneval"

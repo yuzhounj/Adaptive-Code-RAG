@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot script to encode CodeSearchNet corpus and build FAISS index."""
+"""One-shot script to encode HumanEval canonical solutions and build FAISS index."""
 import sys
 import argparse
 import torch
@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
 from src.data.humaneval_loader import load_humaneval
-from src.data.corpus_builder import load_codesearchnet_corpus, save_corpus_metadata
+from src.data.corpus_builder import load_humaneval_corpus, save_corpus_metadata
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.faiss_index import FaissIndex
 import numpy as np
@@ -17,28 +17,19 @@ from tqdm import tqdm
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build CodeSearchNet corpus and FAISS index")
+    parser = argparse.ArgumentParser(description="Build HumanEval corpus and FAISS index")
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--max-size", type=int, default=None)
     args = parser.parse_args()
 
     config = load_config(args.config)
 
-    # Load HumanEval to exclude canonical solutions
-    print("Loading HumanEval for decontamination...")
+    # Load HumanEval
+    print("Loading HumanEval...")
     humaneval = load_humaneval(cache_dir=config.data.humaneval_dir)
-    excluded = {p.canonical_solution.strip() for p in humaneval}
 
-    # Load corpus
-    print("Loading CodeSearchNet corpus...")
-    max_size = args.max_size or config.data.max_corpus_size
-    snippets = load_codesearchnet_corpus(
-        language=config.data.corpus_language,
-        max_size=max_size,
-        cache_dir=config.data.cache_dir,
-        excluded_solutions=list(excluded),
-    )
-    print(f"Loaded {len(snippets)} snippets")
+    # Build corpus from canonical solutions
+    snippets = load_humaneval_corpus(humaneval)
+    print(f"Loaded {len(snippets)} snippets from HumanEval")
 
     # Save corpus metadata
     save_corpus_metadata(snippets, config.data.corpus_dir)

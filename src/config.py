@@ -51,9 +51,6 @@ class RLConfig:
 @dataclass
 class DataConfig:
     train_split: float = 0.8
-    corpus_dataset: str = "code_search_net"
-    corpus_language: str = "python"
-    max_corpus_size: int = 180000
     cache_dir: str = "data/cache"
     corpus_dir: str = "data/corpus"
     humaneval_dir: str = "data/humaneval"

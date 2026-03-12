@@ -55,17 +55,16 @@ export OPENAI_API_KEY=your_key_here
 
 ### Step 1: Build Corpus
 
-Download CodeSearchNet Python corpus and build FAISS index:
+Build FAISS index from HumanEval canonical solutions (~164 snippets):
 
 ```bash
 python scripts/build_corpus.py --config configs/default.yaml
 ```
 
 This will:
-1. Load HumanEval problems (for decontamination)
-2. Download CodeSearchNet Python subset (~180k functions)
-3. Encode all snippets with CodeBERT
-4. Save FAISS index to `data/corpus/`
+1. Load HumanEval problems
+2. Encode canonical solutions with CodeBERT
+3. Save FAISS index to `data/corpus/`
 
 ### Step 2: Train
 
@@ -117,7 +116,7 @@ Adaptive-Code-RAG/
 │   ├── data/
 │   │   ├── schema.py          # HumanEvalProblem, CodeSnippet, RetrievedContext
 │   │   ├── humaneval_loader.py
-│   │   └── corpus_builder.py  # CodeSearchNet loading + metadata I/O
+│   │   └── corpus_builder.py  # HumanEval corpus builder + metadata I/O
 │   ├── retriever/
 │   │   ├── encoder.py         # CodeBERT encoder (gradient-aware)
 │   │   ├── faiss_index.py     # FAISS IndexFlatIP wrapper
