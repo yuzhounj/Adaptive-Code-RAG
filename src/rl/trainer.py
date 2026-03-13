@@ -1,4 +1,5 @@
 import random
+import time
 import torch
 from typing import List, Optional
 from tqdm import tqdm
@@ -50,14 +51,18 @@ class RLTrainer:
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
         """Run one training step on a batch of problems."""
+        t0 = time.perf_counter()
+
         # 1. Retrieve with gradient (fast, serial)
         contexts = [self.retriever.retrieve(problem) for problem in batch]
+        t1 = time.perf_counter()
 
         # 2. Build all prompts and generate in parallel (main bottleneck → now concurrent)
         prompts = [build_prompt(problem, ctx.snippets) for problem, ctx in zip(batch, contexts)]
         all_generated_codes = self.llm_client.generate_batch(
             prompts, n=self.config.generator.n_samples
         )
+        t2 = time.perf_counter()
 
         # 3. Compute rewards and REINFORCE loss per problem
         batch_losses = []
@@ -73,6 +78,7 @@ class RLTrainer:
             batch_losses.append(loss_output.loss)
             batch_rewards.append(loss_output.raw_reward)
             batch_advantages.append(loss_output.advantage)
+        t3 = time.perf_counter()
 
         # 4. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
@@ -83,11 +89,17 @@ class RLTrainer:
             self.config.rl.max_grad_norm,
         )
         self.optimizer.step()
+        t4 = time.perf_counter()
 
         return {
             "loss": total_loss.item(),
             "mean_reward": sum(batch_rewards) / len(batch_rewards),
             "mean_advantage": sum(batch_advantages) / len(batch_advantages),
+            "time/retrieve": t1 - t0,
+            "time/generate": t2 - t1,
+            "time/reward": t3 - t2,
+            "time/backward": t4 - t3,
+            "time/total": t4 - t0,
         }
 
     def train(
@@ -121,7 +133,10 @@ class RLTrainer:
                 self.logger.log(metrics, step=self.global_step)
                 pbar.set_postfix({
                     "loss": f"{metrics['loss']:.4f}",
-                    "reward": f"{metrics['mean_reward']:.3f}",
+                    "rew": f"{metrics['mean_reward']:.3f}",
+                    "ret": f"{metrics['time/retrieve']:.1f}s",
+                    "gen": f"{metrics['time/generate']:.1f}s",
+                    "rwd": f"{metrics['time/reward']:.1f}s",
                 })
 
             # Refresh FAISS index

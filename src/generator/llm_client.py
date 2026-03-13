@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import List
 import litellm
 from src.config import GeneratorConfig
@@ -10,7 +9,7 @@ class LLMClient:
 
     def __init__(self, config: GeneratorConfig):
         self.config = config
-        self._api_key = os.environ.get(config.api_key_env, "") or None
+        self._api_base = config.api_base or None
 
     async def generate_async(self, prompt: str, n: int = 1) -> List[str]:
         """Generate n completions via n parallel calls for universal provider support."""
@@ -18,7 +17,7 @@ class LLMClient:
             tasks = [
                 litellm.acompletion(
                     model=self.config.model,
-                    api_key=self._api_key,
+                    api_base=self._api_base,
                     messages=[
                         {"role": "system", "content": "You are an expert Python programmer. Complete the given function."},
                         {"role": "user", "content": prompt},

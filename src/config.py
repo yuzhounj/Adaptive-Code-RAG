@@ -16,8 +16,8 @@ class RetrieverConfig:
 
 @dataclass
 class GeneratorConfig:
-    model: str = "openai/gpt-4o-mini"
-    api_key_env: str = "OPENAI_API_KEY"
+    model: str = "ollama/qwen2.5-coder:7b"
+    api_base: str = "http://localhost:11434"
     n_samples: int = 4
     temperature: float = 0.8
     max_tokens: int = 512
@@ -28,8 +28,8 @@ class GeneratorConfig:
 class RewardConfig:
     mode: str = "execution"
     execution_timeout: int = 10
-    llm_judge_model: str = "openai/gpt-4o-mini"
-    llm_judge_api_key_env: str = "OPENAI_API_KEY"
+    llm_judge_model: str = "ollama/qwen2.5-coder:7b"
+    llm_judge_api_base: str = "http://localhost:11434"
     hybrid_execution_weight: float = 0.7
 
 

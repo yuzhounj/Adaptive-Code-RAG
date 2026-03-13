@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import List
 import litellm
 from src.config import RewardConfig
@@ -31,7 +30,7 @@ class LLMJudge:
 
     def __init__(self, config: RewardConfig):
         self.config = config
-        self._api_key = os.environ.get(config.llm_judge_api_key_env, "") or None
+        self._api_base = config.llm_judge_api_base or None
 
     async def judge_async(self, problem: HumanEvalProblem, generated_code: str) -> float:
         """Get LLM quality score for generated code."""
@@ -42,7 +41,7 @@ class LLMJudge:
         try:
             response = await litellm.acompletion(
                 model=self.config.llm_judge_model,
-                api_key=self._api_key,
+                api_base=self._api_base,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=10,

@@ -6,18 +6,18 @@ retriever:
   index_refresh_interval: 50
 
 generator:
-  model: "deepseek/deepseek-chat"   # format: provider/model-name
-  api_key_env: "OPENAI_API_KEY"  # litellm will read this env var
+  model: "ollama/qwen2.5-coder:7b"
+  api_base: "http://localhost:11434"
   n_samples: 2
   temperature: 0.8
-  max_tokens: 512
-  timeout: 30
+  max_tokens: 256
+  timeout: 60
 
 reward:
   mode: "execution"  # "execution", "llm_judge", "hybrid"
   execution_timeout: 10
-  llm_judge_model: "deepseek/deepseek-chat"
-  llm_judge_api_key_env: "OPENAI_API_KEY"
+  llm_judge_model: "ollama/qwen2.5-coder:7b"
+  llm_judge_api_base: "http://localhost:11434"
   hybrid_execution_weight: 0.7
 
 rl:

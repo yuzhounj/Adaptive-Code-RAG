@@ -24,12 +24,12 @@ Retrieved Code Snippets
 Prompt Builder
         │
         ▼
-LLM Generator (GPT-4o-mini, frozen)
+LLM Generator (Qwen2.5-Coder-7B via Ollama, frozen)
         │  n=4 code completions
         ▼
 Reward Function
   - execution: run test cases, binary 0/1
-  - llm_judge: GPT-4o-mini quality score
+  - llm_judge: local LLM quality score
   - hybrid: weighted combination
         │
         ▼
@@ -48,9 +48,17 @@ AdamW update → CodeBERT encoder
 pip install -r requirements.txt
 ```
 
-Set your OpenAI API key:
+### Ollama Setup
+
 ```bash
-export OPENAI_API_KEY=your_key_here
+# Install Ollama (if not already installed)
+brew install ollama
+
+# Pull the model (one-time download, ~4.5GB)
+ollama pull qwen2.5-coder:7b
+
+# Start the service (keep running in the background during training)
+ollama serve
 ```
 
 ### Step 1: Build Corpus
@@ -123,7 +131,7 @@ Adaptive-Code-RAG/
 │   │   └── retriever.py       # DifferentiableRetriever
 │   ├── generator/
 │   │   ├── prompt_builder.py  # RAG prompt construction
-│   │   └── llm_client.py      # Async OpenAI client
+│   │   └── llm_client.py      # Async LLM client via litellm
 │   ├── reward/
 │   │   ├── executor.py        # Subprocess-based test execution
 │   │   ├── llm_judge.py       # LLM-as-judge scoring
@@ -174,7 +182,7 @@ loss = -log_prob.sum() * advantage - entropy_coeff * entropy
 | Mode | Description |
 |------|-------------|
 | `execution` | Binary pass/fail from running test cases (default) |
-| `llm_judge` | Continuous 0-1 score from GPT-4o-mini judge |
+| `llm_judge` | Continuous 0-1 score from local LLM judge |
 | `hybrid` | `0.7 * execution + 0.3 * llm_judge` |
 
 ### pass@k Metric
