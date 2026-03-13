@@ -3,6 +3,38 @@ from typing import List
 import litellm
 from src.config import GeneratorConfig
 
+_FENCE = "```"
+SYSTEM_PROMPT = (
+    "You are an expert Python programmer. Complete the given Python function.\n"
+    "Output ONLY the complete Python function definition wrapped in a ```python code block.\n"
+    "No comments, no docstrings in the body, no explanation, no extra text outside the code block.\n"
+    "You must strictly adhere to the format of the example below.\n"
+    "\n"
+    "Example:\n"
+    "User:\n"
+    "def add(a: int, b: int) -> int:\n"
+    '    """Return the sum of a and b."""\n'
+    "\n"
+    "Assistant:\n"
+    f"{_FENCE}python\n"
+    "def add(a: int, b: int) -> int:\n"
+    "    return a + b\n"
+    f"{_FENCE}\n"
+)
+
+
+def _strip_markdown_code_block(text: str) -> str:
+    """Extract code from a markdown ```python ... ``` block, if present."""
+    text = text.strip()
+    if text.startswith(_FENCE):
+        first_newline = text.find("\n")
+        if first_newline == -1:
+            return text
+        text = text[first_newline + 1:]
+        if text.endswith(_FENCE):
+            text = text[: text.rfind(_FENCE)]
+    return text.strip()
+
 
 class LLMClient:
     """Multi-provider LLM client via litellm."""
@@ -19,7 +51,7 @@ class LLMClient:
                     model=self.config.model,
                     api_base=self._api_base,
                     messages=[
-                        {"role": "system", "content": "You are an expert Python programmer. Complete the given function."},
+                        {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=self.config.temperature,
@@ -29,7 +61,7 @@ class LLMClient:
                 for _ in range(n)
             ]
             responses = await asyncio.gather(*tasks)
-            return [r.choices[0].message.content or "" for r in responses]
+            return [_strip_markdown_code_block(r.choices[0].message.content or "") for r in responses]
         except Exception as e:
             print(f"LLM generation error: {e}")
             return ["" for _ in range(n)]

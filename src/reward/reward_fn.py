@@ -1,6 +1,6 @@
-from typing import List
+from typing import List, Optional
 from src.config import RewardConfig
-from src.data.schema import HumanEvalProblem
+from src.data.schema import CodeSnippet, HumanEvalProblem
 from src.reward.executor import batch_execute
 from src.reward.llm_judge import LLMJudge
 
@@ -17,18 +17,23 @@ class RewardFunction:
             self._judge = LLMJudge(self.config)
         return self._judge
 
-    def compute(self, problem: HumanEvalProblem, generated_codes: List[str]) -> List[float]:
+    def compute(
+        self,
+        problem: HumanEvalProblem,
+        generated_codes: List[str],
+        snippets: Optional[List[CodeSnippet]] = None,
+    ) -> List[float]:
         """Compute rewards for multiple generated code samples."""
         mode = self.config.mode
 
         if mode == "execution":
-            return batch_execute(problem, generated_codes, timeout=self.config.execution_timeout)
+            return batch_execute(problem, generated_codes, timeout=self.config.execution_timeout, snippets=snippets)
 
         elif mode == "llm_judge":
             return self._get_judge().judge_batch(problem, generated_codes)
 
         elif mode == "hybrid":
-            exec_rewards = batch_execute(problem, generated_codes, timeout=self.config.execution_timeout)
+            exec_rewards = batch_execute(problem, generated_codes, timeout=self.config.execution_timeout, snippets=snippets)
             judge_rewards = self._get_judge().judge_batch(problem, generated_codes)
             w = self.config.hybrid_execution_weight
             return [w * e + (1 - w) * j for e, j in zip(exec_rewards, judge_rewards)]

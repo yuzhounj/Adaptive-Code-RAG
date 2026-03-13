@@ -1,11 +1,13 @@
+import os
 import random
+import shutil
 import time
 import torch
 from typing import List, Optional
 from tqdm import tqdm
 
 from src.config import TrainingConfig
-from src.data.schema import HumanEvalProblem
+from src.data.schema import HumanEvalProblem, RetrievedContext
 from src.retriever.retriever import DifferentiableRetriever
 from src.retriever.encoder import CodeBERTEncoder
 from src.generator.llm_client import LLMClient
@@ -70,7 +72,7 @@ class RLTrainer:
         batch_advantages = []
 
         for problem, context, generated_codes in zip(batch, contexts, all_generated_codes):
-            rewards = self.reward_fn.compute(problem, generated_codes)
+            rewards = self.reward_fn.compute(problem, generated_codes, snippets=context.snippets)
             loss_output = self.policy.compute_loss(
                 log_probs=context.log_probs,
                 rewards=rewards,
@@ -109,6 +111,12 @@ class RLTrainer:
         resume_from: Optional[str] = None,
     ) -> None:
         """Main training loop."""
+        os.makedirs("outputs", exist_ok=True)
+        fail_dir = "outputs/fail_cases"
+        if os.path.exists(fail_dir):
+            shutil.rmtree(fail_dir)
+        os.makedirs(fail_dir)
+
         if resume_from:
             self.global_step = load_checkpoint(
                 resume_from, self.encoder, self.optimizer
@@ -129,15 +137,15 @@ class RLTrainer:
             pbar.update(1)
 
             # Logging
+            pbar.set_postfix({
+                "loss": f"{metrics['loss']:.4f}",
+                "rew": f"{metrics['mean_reward']:.3f}",
+                "ret": f"{metrics['time/retrieve']:.1f}s",
+                "gen": f"{metrics['time/generate']:.1f}s",
+                "rwd": f"{metrics['time/reward']:.1f}s",
+            })
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
-                pbar.set_postfix({
-                    "loss": f"{metrics['loss']:.4f}",
-                    "rew": f"{metrics['mean_reward']:.3f}",
-                    "ret": f"{metrics['time/retrieve']:.1f}s",
-                    "gen": f"{metrics['time/generate']:.1f}s",
-                    "rwd": f"{metrics['time/reward']:.1f}s",
-                })
 
             # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:

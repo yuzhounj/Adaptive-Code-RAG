@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import Optional
 from src.config import TrainingConfig
 
@@ -14,9 +15,10 @@ class TrainingLogger:
         if config.logging.use_tensorboard:
             try:
                 from torch.utils.tensorboard import SummaryWriter
-                os.makedirs(config.logging.log_dir, exist_ok=True)
-                self._writer = SummaryWriter(log_dir=config.logging.log_dir)
-                print(f"TensorBoard logging to {config.logging.log_dir}")
+                run_dir = os.path.join(config.logging.log_dir, datetime.now().strftime("run_%Y%m%d_%H%M%S"))
+                os.makedirs(run_dir, exist_ok=True)
+                self._writer = SummaryWriter(log_dir=run_dir)
+                print(f"TensorBoard logging to {run_dir}")
             except ImportError:
                 print("TensorBoard not available, skipping")
 
