@@ -25,16 +25,20 @@ def main():
 
     config = load_config(args.config)
 
+    project_root = Path(__file__).parent.parent
+
     # Load HumanEval
     print("Loading HumanEval...")
-    humaneval = load_humaneval(cache_dir=config.data.humaneval_dir)
+    humaneval_dir = str(project_root / config.data.humaneval_dir)
+    humaneval = load_humaneval(cache_dir=humaneval_dir)
 
     # Build corpus from canonical solutions
     snippets = load_humaneval_corpus(humaneval)
     print(f"Loaded {len(snippets)} snippets from HumanEval")
 
     # Save corpus metadata
-    save_corpus_metadata(snippets, config.data.corpus_dir)
+    corpus_dir = str(project_root / config.data.corpus_dir)
+    save_corpus_metadata(snippets, corpus_dir)
 
     # Encode corpus
     if torch.cuda.is_available():
@@ -65,7 +69,7 @@ def main():
     index = FaissIndex(embedding_dim=config.retriever.embedding_dim)
     index.build(embeddings)
 
-    index_path = str(Path(config.data.corpus_dir) / "faiss.index")
+    index_path = str(project_root / config.data.corpus_dir / "faiss.index")
     index.save(index_path)
 
     # Quick test query
