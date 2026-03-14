@@ -72,10 +72,12 @@ class RLTrainer:
         batch_advantages = []
 
         for problem, context, generated_codes in zip(batch, contexts, all_generated_codes):
-            rewards = self.reward_fn.compute(problem, generated_codes, snippets=context.snippets)
+            snippet_rewards = self.reward_fn.compute_snippet_rewards(
+                problem, generated_codes, snippets=context.snippets
+            )
             loss_output = self.policy.compute_loss(
                 log_probs=context.log_probs,
-                rewards=rewards,
+                snippet_rewards=snippet_rewards,
             )
             batch_losses.append(loss_output.loss)
             batch_rewards.append(loss_output.raw_reward)

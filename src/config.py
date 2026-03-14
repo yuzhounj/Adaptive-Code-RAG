@@ -26,11 +26,11 @@ class GeneratorConfig:
 
 @dataclass
 class RewardConfig:
-    mode: str = "execution"
     execution_timeout: int = 10
-    llm_judge_model: str = "ollama/qwen2.5-coder:7b"
-    llm_judge_api_base: str = "http://localhost:11434"
-    hybrid_execution_weight: float = 0.7
+    relevance_model: str = "ollama/qwen2.5-coder:7b"
+    relevance_api_base: str = "http://localhost:11434"
+    execution_weight: float = 0.7
+    relevance_weight: float = 0.3
 
 
 @dataclass

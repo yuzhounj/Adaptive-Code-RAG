@@ -27,14 +27,14 @@ Prompt Builder
 LLM Generator (Qwen2.5-Coder-7B via Ollama, frozen)
         │  n=4 code completions
         ▼
-Reward Function
-  - execution: run test cases, binary 0/1
-  - llm_judge: local LLM quality score
-  - hybrid: weighted combination
+Reward Function (per-snippet)
+  - execution_reward: mean pass rate across n_samples generations
+  - relevance_score: LLM relevance score per snippet
+  - snippet_reward = 0.7 * execution_reward + 0.3 * relevance_score
         │
         ▼
-REINFORCE Loss
-  loss = -log_prob * (reward - baseline) - entropy_bonus
+REINFORCE Loss (per-snippet)
+  loss = -sum_i(log_probs[i] * (snippet_reward[i] - baseline)) - entropy_bonus
         │
         ▼
 AdamW update → CodeBERT encoder
@@ -82,7 +82,7 @@ python scripts/train.py --config configs/default.yaml
 
 With overrides:
 ```bash
-python scripts/train.py rl.learning_rate=5e-6 rl.batch_size=4 reward.mode=hybrid
+python scripts/train.py rl.learning_rate=5e-6 rl.batch_size=4 reward.execution_weight=0.8
 ```
 
 Resume from checkpoint:
@@ -177,13 +177,19 @@ loss = -log_prob.sum() * advantage - entropy_coeff * entropy
 - Entropy bonus: prevents the retriever from collapsing to always retrieving the same snippets
 - Multiple samples (n=4) per problem reduce variance
 
-### Reward Modes
+### Per-Snippet Reward
 
-| Mode | Description |
-|------|-------------|
-| `execution` | Binary pass/fail from running test cases (default) |
-| `llm_judge` | Continuous 0-1 score from local LLM judge |
-| `hybrid` | `0.7 * execution + 0.3 * llm_judge` |
+Each retrieved snippet gets an independent reward used directly in REINFORCE:
+
+```
+snippet_reward[i] = execution_weight * execution_reward + relevance_weight * relevance_score[i]
+```
+
+- `execution_reward`: mean pass rate across n_samples code generations (shared by all k snippets)
+- `relevance_score[i]`: LLM score for how helpful snippet i is for solving the problem (0~1)
+- Default weights: `execution_weight=0.7`, `relevance_weight=0.3`
+
+This gives each snippet a differentiated gradient signal, allowing the retriever to learn which specific snippets are useful rather than treating all k equally.
 
 ### pass@k Metric
 
@@ -206,7 +212,8 @@ All hyperparameters are in `configs/default.yaml`. Key settings:
 | `rl.batch_size` | 8 | Problems per gradient step |
 | `rl.max_steps` | 5000 | Total training steps |
 | `rl.entropy_coeff` | 0.01 | Entropy regularization weight |
-| `reward.mode` | execution | Reward computation method |
+| `reward.execution_weight` | 0.7 | Weight for execution pass rate in snippet reward |
+| `reward.relevance_weight` | 0.3 | Weight for LLM relevance score in snippet reward |
 
 ## Running Tests
 

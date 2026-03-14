@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate pass@k on trained vs baseline retriever."""
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import argparse
 import torch

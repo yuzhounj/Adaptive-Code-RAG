@@ -2,20 +2,46 @@ from typing import List, Optional
 from src.config import RewardConfig
 from src.data.schema import CodeSnippet, HumanEvalProblem
 from src.reward.executor import batch_execute
-from src.reward.llm_judge import LLMJudge
+from src.reward.llm_judge import SnippetRelevanceJudge
 
 
 class RewardFunction:
-    """Unified reward interface supporting execution, LLM judge, and hybrid modes."""
+    """Reward interface: per-snippet rewards combining execution + LLM relevance."""
 
     def __init__(self, config: RewardConfig):
         self.config = config
-        self._judge: LLMJudge = None
+        self._judge: Optional[SnippetRelevanceJudge] = None
 
-    def _get_judge(self) -> LLMJudge:
+    def _get_judge(self) -> SnippetRelevanceJudge:
         if self._judge is None:
-            self._judge = LLMJudge(self.config)
+            self._judge = SnippetRelevanceJudge(self.config)
         return self._judge
+
+    def compute_snippet_rewards(
+        self,
+        problem: HumanEvalProblem,
+        generated_codes: List[str],
+        snippets: List[CodeSnippet],
+    ) -> List[float]:
+        """Compute per-snippet rewards for REINFORCE training.
+
+        Each snippet reward = w_exec * execution_reward + w_rel * relevance_score
+        where execution_reward is the mean pass rate across n_samples generations.
+
+        Returns List[float] of length k (one per snippet).
+        """
+        exec_rewards = batch_execute(
+            problem, generated_codes,
+            timeout=self.config.execution_timeout,
+            snippets=snippets,
+        )
+        exec_reward = sum(exec_rewards) / len(exec_rewards) if exec_rewards else 0.0
+
+        relevance_scores = self._get_judge().score_batch(problem, snippets)
+
+        w_exec = self.config.execution_weight
+        w_rel = self.config.relevance_weight
+        return [w_exec * exec_reward + w_rel * rel for rel in relevance_scores]
 
     def compute(
         self,
@@ -23,24 +49,12 @@ class RewardFunction:
         generated_codes: List[str],
         snippets: Optional[List[CodeSnippet]] = None,
     ) -> List[float]:
-        """Compute rewards for multiple generated code samples."""
-        mode = self.config.mode
+        """Compute execution-only rewards for evaluation (pass@k).
 
-        if mode == "execution":
-            return batch_execute(problem, generated_codes, timeout=self.config.execution_timeout, snippets=snippets)
-
-        elif mode == "llm_judge":
-            return self._get_judge().judge_batch(problem, generated_codes)
-
-        elif mode == "hybrid":
-            exec_rewards = batch_execute(problem, generated_codes, timeout=self.config.execution_timeout, snippets=snippets)
-            judge_rewards = self._get_judge().judge_batch(problem, generated_codes)
-            w = self.config.hybrid_execution_weight
-            return [w * e + (1 - w) * j for e, j in zip(exec_rewards, judge_rewards)]
-
-        else:
-            raise ValueError(f"Unknown reward mode: {mode}")
-
-    def compute_single(self, problem: HumanEvalProblem, generated_code: str) -> float:
-        """Compute reward for a single generated code sample."""
-        return self.compute(problem, [generated_code])[0]
+        Returns List[float] of length n_samples (one per generated code).
+        """
+        return batch_execute(
+            problem, generated_codes,
+            timeout=self.config.execution_timeout,
+            snippets=snippets,
+        )

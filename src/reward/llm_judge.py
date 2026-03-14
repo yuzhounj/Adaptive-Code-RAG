@@ -2,46 +2,46 @@ import asyncio
 from typing import List
 import litellm
 from src.config import RewardConfig
-from src.data.schema import HumanEvalProblem
+from src.data.schema import CodeSnippet, HumanEvalProblem
 
 
-LLM_JUDGE_PROMPT = """You are a code quality judge. Evaluate the following Python function implementation.
+SNIPPET_RELEVANCE_PROMPT = """You are evaluating the relevance of a code snippet for solving a programming problem.
 
-Problem description:
+Problem:
 {problem_prompt}
 
-Generated implementation:
+Code Snippet:
 ```python
-{generated_code}
+{snippet_code}
 ```
 
-Rate the quality of this implementation on a scale from 0.0 to 1.0:
-- 1.0: Correct, clean, handles edge cases
-- 0.7-0.9: Mostly correct but minor issues
-- 0.4-0.6: Partial implementation or logic errors
-- 0.1-0.3: Significant problems
-- 0.0: Completely wrong or empty
+How helpful is this snippet for solving the above problem?
+Rate from 0.0 to 1.0:
+- 1.0: Directly solves or demonstrates the exact algorithm needed
+- 0.7-0.9: Shows closely related patterns or techniques
+- 0.4-0.6: Somewhat related, could provide partial guidance
+- 0.1-0.3: Tangentially related
+- 0.0: Completely unrelated
 
-Respond with ONLY a single float number between 0.0 and 1.0."""
+Respond with ONLY a single float between 0.0 and 1.0."""
 
 
-class LLMJudge:
-    """LLM-as-judge for code quality evaluation (fallback when execution unavailable)."""
+class SnippetRelevanceJudge:
+    """LLM-as-judge for snippet relevance scoring."""
 
     def __init__(self, config: RewardConfig):
         self.config = config
-        self._api_base = config.llm_judge_api_base or None
 
-    async def judge_async(self, problem: HumanEvalProblem, generated_code: str) -> float:
-        """Get LLM quality score for generated code."""
-        prompt = LLM_JUDGE_PROMPT.format(
+    async def score_async(self, problem: HumanEvalProblem, snippet: CodeSnippet) -> float:
+        """Score relevance of a single snippet to a problem."""
+        prompt = SNIPPET_RELEVANCE_PROMPT.format(
             problem_prompt=problem.prompt,
-            generated_code=generated_code,
+            snippet_code=snippet.code,
         )
         try:
             response = await litellm.acompletion(
-                model=self.config.llm_judge_model,
-                api_base=self._api_base,
+                model=self.config.relevance_model,
+                api_base=self.config.relevance_api_base,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=10,
@@ -50,17 +50,19 @@ class LLMJudge:
             score = float(text)
             return max(0.0, min(1.0, score))
         except Exception as e:
-            print(f"LLM judge error: {e}")
+            print(f"Relevance judge error: {e}")
             return 0.0
 
-    def judge(self, problem: HumanEvalProblem, generated_code: str) -> float:
-        return asyncio.run(self.judge_async(problem, generated_code))
-
-    async def judge_batch_async(
-        self, problem: HumanEvalProblem, generated_codes: List[str]
+    async def score_batch_async(
+        self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
     ) -> List[float]:
-        tasks = [self.judge_async(problem, code) for code in generated_codes]
+        tasks = [self.score_async(problem, snippet) for snippet in snippets]
         return await asyncio.gather(*tasks)
 
-    def judge_batch(self, problem: HumanEvalProblem, generated_codes: List[str]) -> List[float]:
-        return asyncio.run(self.judge_batch_async(problem, generated_codes))
+    def score_batch(
+        self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
+    ) -> List[float]:
+        """Score relevance of multiple snippets concurrently."""
+        if not snippets:
+            return []
+        return asyncio.run(self.score_batch_async(problem, snippets))

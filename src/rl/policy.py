@@ -49,34 +49,38 @@ class REINFORCEPolicy:
 
     def compute_loss(
         self,
-        log_probs: torch.Tensor,   # [k] log probs of retrieved snippets
-        rewards: List[float],       # rewards from n_samples generations
+        log_probs: torch.Tensor,       # [k] log probs of retrieved snippets
+        snippet_rewards: List[float],  # [k] per-snippet rewards
     ) -> PolicyLossOutput:
         """
-        Compute REINFORCE loss.
+        Compute per-snippet REINFORCE loss.
+
+        Each snippet gets its own advantage = snippet_reward - baseline.
+        Loss = -sum_i(log_probs[i] * advantages[i]) - entropy_coeff * entropy
 
         Args:
             log_probs: gradient-attached log probs from retriever [k]
-            rewards: list of rewards from n code generations
+            snippet_rewards: per-snippet rewards combining execution + relevance [k]
 
         Returns:
-            PolicyLossOutput with loss tensor, advantage, and entropy
+            PolicyLossOutput with loss tensor, mean advantage, and entropy
         """
-        # Average reward across n_samples
-        mean_reward = sum(rewards) / len(rewards) if rewards else 0.0
+        mean_reward = sum(snippet_rewards) / len(snippet_rewards) if snippet_rewards else 0.0
 
-        # Update baseline and compute advantage
-        advantage = mean_reward - self.baseline.get()
+        # Compute per-snippet advantages against shared baseline
+        baseline_val = self.baseline.get()
         self.baseline.update(mean_reward)
 
-        # Scalar log prob: sum of log probs of retrieved set
-        log_prob_scalar = log_probs.sum()
+        advantages = torch.tensor(
+            [r - baseline_val for r in snippet_rewards],
+            dtype=torch.float32,
+            device=log_probs.device,
+        )
 
-        # Policy gradient loss
-        pg_loss = -log_prob_scalar * advantage
+        # Per-snippet policy gradient loss
+        pg_loss = -(log_probs * advantages).sum()
 
         # Entropy bonus to prevent retrieval collapse
-        # Entropy of softmax distribution over retrieved snippets
         probs = log_probs.exp()
         entropy = -(probs * log_probs).sum()
 
@@ -84,7 +88,7 @@ class REINFORCEPolicy:
 
         return PolicyLossOutput(
             loss=loss,
-            advantage=advantage,
+            advantage=advantages.mean().item(),
             entropy=entropy.item(),
             raw_reward=mean_reward,
         )
