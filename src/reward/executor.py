@@ -87,16 +87,16 @@ def _build_test_script(problem: HumanEvalProblem, generated_code: str) -> str:
     ))
 
     if has_toplevel_def:
-        # Complete implementation — use as-is (imports already included)
-        function_code = stripped
+        # Complete implementation — prepend prompt to preserve helper functions
+        function_code = problem.prompt.rstrip() + "\n\n" + stripped
     else:
         # Only the function body was generated — indent and attach to prompt signature
         indented_body = textwrap.indent(textwrap.dedent(generated_code), "    ")
         function_code = problem.prompt.rstrip() + "\n" + indented_body
     # Prepend any imports from the prompt that the body may need
     import_lines = "\n".join(
-        line for line in problem.prompt.splitlines()
-        if line.startswith("import ") or line.startswith("from ")
+        line.strip() for line in problem.prompt.splitlines()
+        if line.strip().startswith("import ") or line.strip().startswith("from ")
     )
     if import_lines:
         function_code = import_lines + "\n\n" + function_code
