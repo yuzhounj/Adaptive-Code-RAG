@@ -6,7 +6,7 @@ retriever:
   index_refresh_interval: 50
 
 generator:
-  model: "ollama/qwen2.5-coder:7b"
+  model: "ollama/qwen2.5:1.5b"
   api_base: "http://localhost:11434"
   n_samples: 1
   temperature: 0.8
@@ -16,7 +16,7 @@ generator:
 reward:
   mode: "execution"  # "execution", "llm_judge", "hybrid"
   execution_timeout: 10
-  llm_judge_model: "ollama/qwen2.5-coder:7b"
+  llm_judge_model: "ollama/qwen2.5:1.5b"
   llm_judge_api_base: "http://localhost:11434"
   hybrid_execution_weight: 0.7
 

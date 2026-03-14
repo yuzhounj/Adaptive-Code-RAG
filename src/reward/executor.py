@@ -96,7 +96,8 @@ def _build_test_script(problem: HumanEvalProblem, generated_code: str) -> str:
     # Prepend any imports from the prompt that the body may need
     import_lines = "\n".join(
         line.strip() for line in problem.prompt.splitlines()
-        if line.strip().startswith("import ") or line.strip().startswith("from ")
+        if re.match(r'\s*import\s+\w', line)
+        or re.match(r'\s*from\s+[\w.]+\s+import\b', line)
     )
     if import_lines:
         function_code = import_lines + "\n\n" + function_code
