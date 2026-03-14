@@ -23,7 +23,7 @@ reward:
 rl:
   learning_rate: 1.0e-5
   batch_size: 1
-  max_steps: 50
+  max_steps: 1000
   baseline_decay: 0.99
   entropy_coeff: 0.05
   max_grad_norm: 1.0
