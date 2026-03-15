@@ -5,7 +5,7 @@ from src.config import RewardConfig
 from src.data.schema import CodeSnippet, HumanEvalProblem
 
 
-SNIPPET_RELEVANCE_PROMPT = """You are evaluating the relevance of a code snippet for solving a programming problem.
+SNIPPET_RELEVANCE_PROMPT = """You are a strict code relevance evaluator. Your job is to judge whether a code snippet would genuinely help solve a specific programming problem.
 
 Problem:
 {problem_prompt}
@@ -15,15 +15,20 @@ Code Snippet:
 {snippet_code}
 ```
 
-How helpful is this snippet for solving the above problem?
-Rate from 0.0 to 1.0:
-- 1.0: Directly solves or demonstrates the exact algorithm needed
-- 0.7-0.9: Shows closely related patterns or techniques
-- 0.4-0.6: Somewhat related, could provide partial guidance
-- 0.1-0.3: Tangentially related
-- 0.0: Completely unrelated
+Choose EXACTLY one score from this fixed set: 0.0, 0.3, 0.7, 1.0
 
-Respond with ONLY a single float between 0.0 and 1.0."""
+Scoring rules (be strict — when in doubt, score lower):
+- 1.0: The snippet directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
+- 0.7: The snippet demonstrates a clearly relevant technique or pattern (e.g., same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
+- 0.3: The snippet is in the same general domain (e.g., both deal with strings, both use recursion) but the core logic is different. Provides little concrete guidance.
+- 0.0: The snippet is unrelated or uses a completely different approach. Retrieving it wastes context.
+
+Common mistakes to avoid:
+- Do NOT give 0.7 just because both snippets use Python or share basic syntax.
+- Do NOT give 0.7 for superficial keyword overlap (e.g., both mention "list").
+- Only give 1.0 if the algorithm itself matches, not just the topic.
+
+Respond with ONLY one of: 0.0, 0.3, 0.7, 1.0"""
 
 
 class SnippetRelevanceJudge:

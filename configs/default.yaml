@@ -1,6 +1,6 @@
 retriever:
   model_name: "microsoft/codebert-base"
-  top_k: 3
+  top_k: 5
   max_seq_len: 512
   embedding_dim: 768
   index_refresh_interval: 50
@@ -15,7 +15,7 @@ generator:
 
 reward:
   execution_timeout: 10
-  relevance_model: "ollama/qwen2.5:1.5b"
+  relevance_model: "ollama/qwen2.5-coder:7b"
   relevance_api_base: "http://localhost:11434"
   execution_weight: 0.5
   relevance_weight: 0.5
@@ -23,13 +23,13 @@ reward:
 rl:
   learning_rate: 1.0e-5
   batch_size: 1
-  max_steps: 1000
+  max_steps: 5000
   baseline_decay: 0.99
   entropy_coeff: 0.05
   max_grad_norm: 1.0
   warmup_steps: 100
   eval_interval: 200
-  checkpoint_interval: 500
+  checkpoint_interval: 1000
   log_interval: 10
 
 data:
