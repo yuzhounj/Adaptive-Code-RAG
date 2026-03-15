@@ -27,7 +27,7 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
     for problem in tqdm(problems, desc="Evaluating"):
         context = retriever.retrieve(problem)
         prompt = build_prompt(problem, context.snippets)
-        generated_codes = llm_client.generate(prompt, n=n_samples)
+        generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes)
         all_rewards.append(rewards)
     return all_rewards
@@ -85,13 +85,14 @@ def main():
     reward_fn = RewardFunction(config=config.reward)
 
     n_samples = config.generator.n_samples
+    encoder.eval()  # disable dropout for deterministic evaluation
 
     if args.baseline:
         # No-retrieval baseline: empty snippets
         all_rewards = []
         for problem in tqdm(eval_set, desc="Baseline"):
             prompt = build_prompt(problem, snippets=[])
-            generated_codes = llm_client.generate(prompt, n=n_samples)
+            generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
             rewards = reward_fn.compute(problem, generated_codes)
             all_rewards.append(rewards)
     else:
