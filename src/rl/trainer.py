@@ -182,7 +182,16 @@ class RLTrainer:
         pass_at_1 = compute_pass_at_k(all_rewards, k=1)
         pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
 
+        # Judge relevance: average top-k snippet relevance across eval problems
+        all_rel_scores = []
+        for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Judging", leave=False):
+            if ctx.snippets:
+                scores = self.reward_fn.score_relevance(p, ctx.snippets)
+                all_rel_scores.append(sum(scores) / len(scores))
+        avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
+
         return {
             "pass@1": pass_at_1,
             f"pass@{self.config.generator.n_samples}": pass_at_k,
+            "avg_snippet_relevance": avg_relevance,
         }

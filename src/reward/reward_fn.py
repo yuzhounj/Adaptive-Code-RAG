@@ -43,6 +43,14 @@ class RewardFunction:
         w_rel = self.config.relevance_weight
         return [w_exec * exec_reward + w_rel * rel for rel in relevance_scores]
 
+    def score_relevance(
+        self,
+        problem: HumanEvalProblem,
+        snippets: List[CodeSnippet],
+    ) -> List[float]:
+        """Return per-snippet relevance scores from LLM judge."""
+        return self._get_judge().score_batch(problem, snippets)
+
     def compute(
         self,
         problem: HumanEvalProblem,
