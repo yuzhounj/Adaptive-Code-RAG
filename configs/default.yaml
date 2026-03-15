@@ -3,6 +3,7 @@ retriever:
   top_k: 5
   max_seq_len: 512
   embedding_dim: 768
+  freeze_doc_encoder: true
 
 generator:
   model: "ollama/qwen2.5:1.5b"

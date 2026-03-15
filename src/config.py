@@ -12,6 +12,7 @@ class RetrieverConfig:
     max_seq_len: int = 512
     embedding_dim: int = 768
     index_refresh_interval: int = 50
+    freeze_doc_encoder: bool = False
 
 
 @dataclass
