@@ -129,6 +129,12 @@ class RLTrainer:
 
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
 
+        # Initial evaluation at step 0 (baseline before training)
+        if eval_problems and self.global_step == 0:
+            eval_metrics = self.evaluate(eval_problems)
+            self.logger.log(eval_metrics, step=0, prefix="eval")
+            print(f"\nStep 0 eval (baseline): {eval_metrics}")
+
         while self.global_step < rl_cfg.max_steps:
             # Sample batch
             batch = random.sample(train_problems, min(rl_cfg.batch_size, len(train_problems)))
