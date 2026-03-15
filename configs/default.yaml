@@ -3,7 +3,7 @@ retriever:
   top_k: 5
   max_seq_len: 512
   embedding_dim: 768
-  index_refresh_interval: 50
+  index_refresh_interval: 999999 #effectively never
 
 generator:
   model: "ollama/qwen2.5:1.5b"
