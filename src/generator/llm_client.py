@@ -1,5 +1,5 @@
 import asyncio
-from typing import List
+from typing import List, Optional
 import litellm
 from src.config import GeneratorConfig
 
@@ -43,8 +43,9 @@ class LLMClient:
         self.config = config
         self._api_base = config.api_base or None
 
-    async def generate_async(self, prompt: str, n: int = 1) -> List[str]:
+    async def generate_async(self, prompt: str, n: int = 1, temperature: Optional[float] = None) -> List[str]:
         """Generate n completions via n parallel calls for universal provider support."""
+        temp = temperature if temperature is not None else self.config.temperature
         try:
             tasks = [
                 litellm.acompletion(
@@ -54,7 +55,7 @@ class LLMClient:
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
-                    temperature=self.config.temperature,
+                    temperature=temp,
                     max_tokens=self.config.max_tokens,
                     timeout=self.config.timeout,
                 )
@@ -66,15 +67,15 @@ class LLMClient:
             print(f"LLM generation error: {e}")
             return ["" for _ in range(n)]
 
-    def generate(self, prompt: str, n: int = 1) -> List[str]:
+    def generate(self, prompt: str, n: int = 1, temperature: Optional[float] = None) -> List[str]:
         """Synchronous wrapper around async generation."""
-        return asyncio.run(self.generate_async(prompt, n=n))
+        return asyncio.run(self.generate_async(prompt, n=n, temperature=temperature))
 
-    async def generate_batch_async(self, prompts: List[str], n: int = 1) -> List[List[str]]:
+    async def generate_batch_async(self, prompts: List[str], n: int = 1, temperature: Optional[float] = None) -> List[List[str]]:
         """Generate completions for a batch of prompts concurrently."""
-        tasks = [self.generate_async(prompt, n=n) for prompt in prompts]
+        tasks = [self.generate_async(prompt, n=n, temperature=temperature) for prompt in prompts]
         return await asyncio.gather(*tasks)
 
-    def generate_batch(self, prompts: List[str], n: int = 1) -> List[List[str]]:
+    def generate_batch(self, prompts: List[str], n: int = 1, temperature: Optional[float] = None) -> List[List[str]]:
         """Synchronous batch generation."""
-        return asyncio.run(self.generate_batch_async(prompts, n=n))
+        return asyncio.run(self.generate_batch_async(prompts, n=n, temperature=temperature))

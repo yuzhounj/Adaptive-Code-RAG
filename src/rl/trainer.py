@@ -175,29 +175,33 @@ class RLTrainer:
 
     def evaluate(self, problems: List[HumanEvalProblem]) -> dict:
         """Evaluate pass@k on eval set."""
-        contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Evaluating", leave=False)]
-        prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
-        all_generated_codes = self.llm_client.generate_batch(
-            prompts, n=self.config.generator.n_samples
-        )
-        all_rewards = [
-            self.reward_fn.compute(p, codes)
-            for p, codes in zip(problems, all_generated_codes)
-        ]
+        self.encoder.eval()  # disable dropout for deterministic eval
+        try:
+            contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Evaluating", leave=False)]
+            prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
+            all_generated_codes = self.llm_client.generate_batch(
+                prompts, n=self.config.generator.n_samples, temperature=0.0
+            )
+            all_rewards = [
+                self.reward_fn.compute(p, codes)
+                for p, codes in zip(problems, all_generated_codes)
+            ]
 
-        pass_at_1 = compute_pass_at_k(all_rewards, k=1)
-        pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
+            pass_at_1 = compute_pass_at_k(all_rewards, k=1)
+            pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
 
-        # Judge relevance: average top-k snippet relevance across eval problems
-        all_rel_scores = []
-        for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Judging", leave=False):
-            if ctx.snippets:
-                scores = self.reward_fn.score_relevance(p, ctx.snippets)
-                all_rel_scores.append(sum(scores) / len(scores))
-        avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
+            # Judge relevance: average top-k snippet relevance across eval problems
+            all_rel_scores = []
+            for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Judging", leave=False):
+                if ctx.snippets:
+                    scores = self.reward_fn.score_relevance(p, ctx.snippets)
+                    all_rel_scores.append(sum(scores) / len(scores))
+            avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
 
-        return {
-            "pass@1": pass_at_1,
-            f"pass@{self.config.generator.n_samples}": pass_at_k,
-            "avg_snippet_relevance": avg_relevance,
-        }
+            return {
+                "pass@1": pass_at_1,
+                f"pass@{self.config.generator.n_samples}": pass_at_k,
+                "avg_snippet_relevance": avg_relevance,
+            }
+        finally:
+            self.encoder.train()  # always restore training mode

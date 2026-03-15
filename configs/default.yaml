@@ -15,7 +15,7 @@ generator:
 
 reward:
   execution_timeout: 10
-  relevance_model: "ollama/qwen2.5-coder:7b"
+  relevance_model: "ollama/qwen2.5-coder:14b"
   relevance_api_base: "http://localhost:11434"
   execution_weight: 0.5
   relevance_weight: 0.5
