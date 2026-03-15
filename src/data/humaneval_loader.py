@@ -18,7 +18,11 @@ def load_humaneval(cache_dir: str = "data/humaneval") -> List[HumanEvalProblem]:
     return problems
 
 
-def split_humaneval(problems: List[HumanEvalProblem], train_ratio: float = 0.8) -> Tuple[List[HumanEvalProblem], List[HumanEvalProblem]]:
-    """Split into train/eval sets."""
-    n_train = int(len(problems) * train_ratio)
-    return problems[:n_train], problems[n_train:]
+def split_humaneval(problems: List[HumanEvalProblem], train_ratio: float = 0.8, seed: int = 42) -> Tuple[List[HumanEvalProblem], List[HumanEvalProblem]]:
+    """Split into train/eval sets with random shuffle for balanced difficulty distribution."""
+    import random
+    shuffled = problems.copy()
+    random.seed(seed)
+    random.shuffle(shuffled)
+    n_train = int(len(shuffled) * train_ratio)
+    return shuffled[:n_train], shuffled[n_train:]
