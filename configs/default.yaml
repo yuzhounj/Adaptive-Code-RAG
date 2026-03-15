@@ -3,7 +3,6 @@ retriever:
   top_k: 5
   max_seq_len: 512
   embedding_dim: 768
-  index_refresh_interval: 999999 #effectively never
 
 generator:
   model: "ollama/qwen2.5:1.5b"
@@ -31,6 +30,7 @@ rl:
   eval_interval: 200
   checkpoint_interval: 1000
   log_interval: 10
+  index_refresh_interval: 999999
 
 data:
   train_split: 0.8
