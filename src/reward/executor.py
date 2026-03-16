@@ -19,6 +19,7 @@ def _write_fail_log(
     stderr: str,
     tag: str,
     snippets: Optional[List[CodeSnippet]] = None,
+    relevance_scores: Optional[List[float]] = None,
 ) -> None:
     os.makedirs(_FAIL_LOG_DIR, exist_ok=True)
     task_id_safe = problem.task_id.replace("/", "_")
@@ -31,7 +32,8 @@ def _write_fail_log(
         if snippets:
             f.write(f"## RAG Retrieved Snippets ({len(snippets)} total)\n\n")
             for i, snippet in enumerate(snippets, 1):
-                f.write(f"### Snippet {i}: `{snippet.snippet_id}`\n\n")
+                score_str = f" | relevance={relevance_scores[i-1]:.3f}" if relevance_scores and i - 1 < len(relevance_scores) else ""
+                f.write(f"### Snippet {i}: `{snippet.snippet_id}`{score_str}\n\n")
                 if snippet.docstring:
                     f.write(f"{snippet.docstring}\n\n")
                 f.write(f"```python\n{snippet.code}\n```\n\n")
@@ -47,6 +49,7 @@ def execute_solution(
     generated_code: str,
     timeout: int = 10,
     snippets: Optional[List[CodeSnippet]] = None,
+    relevance_scores: Optional[List[float]] = None,
 ) -> float:
     """
     Execute generated code against HumanEval test cases.
@@ -67,10 +70,10 @@ def execute_solution(
         )
         if result.returncode == 0:
             return 1.0
-        _write_fail_log(problem, generated_code, result.stderr.strip(), "FAIL", snippets)
+        _write_fail_log(problem, generated_code, result.stderr.strip(), "FAIL", snippets, relevance_scores)
         return 0.0
     except subprocess.TimeoutExpired:
-        _write_fail_log(problem, generated_code, "", "TIMEOUT", snippets)
+        _write_fail_log(problem, generated_code, "", "TIMEOUT", snippets, relevance_scores)
         return 0.0
     except Exception:
         return 0.0
@@ -112,11 +115,12 @@ def batch_execute(
     generated_codes: list,
     timeout: int = 10,
     snippets: Optional[List[CodeSnippet]] = None,
+    relevance_scores: Optional[List[float]] = None,
 ) -> list:
     """Execute multiple generated solutions concurrently, return list of rewards."""
     with ThreadPoolExecutor(max_workers=len(generated_codes)) as executor:
         futures = [
-            executor.submit(execute_solution, problem, code, timeout, snippets)
+            executor.submit(execute_solution, problem, code, timeout, snippets, relevance_scores)
             for code in generated_codes
         ]
         return [f.result() for f in futures]

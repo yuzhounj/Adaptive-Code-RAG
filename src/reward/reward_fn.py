@@ -37,6 +37,7 @@ class RewardFunction:
         problem: HumanEvalProblem,
         generated_codes: List[str],
         snippets: Optional[List[CodeSnippet]] = None,
+        relevance_scores: Optional[List[float]] = None,
     ) -> List[float]:
         """Compute execution-only rewards for evaluation (pass@k).
 
@@ -46,4 +47,5 @@ class RewardFunction:
             problem, generated_codes,
             timeout=self.config.execution_timeout,
             snippets=snippets,
+            relevance_scores=relevance_scores,
         )
