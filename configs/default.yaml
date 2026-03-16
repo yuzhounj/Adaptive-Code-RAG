@@ -38,7 +38,7 @@ data:
   corpus_dir: "data/corpus"
   humaneval_dir: "data/humaneval"
   codesearchnet_max_samples: 5000
-  csn_eval_size: 500
+  csn_eval_size: 100
   humaneval_eval_size: 50
 
 logging:
