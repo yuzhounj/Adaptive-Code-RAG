@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
 from src.data.codesearchnet_loader import load_codesearchnet
+from src.data.humaneval_loader import load_humaneval
 from src.data.corpus_builder import load_humaneval_corpus, save_corpus_metadata
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.faiss_index import FaissIndex
@@ -26,6 +27,9 @@ def main():
     config = load_config(args.config)
 
     project_root = Path(__file__).parent.parent
+
+    print("Caching HumanEval dataset...")
+    load_humaneval(cache_dir=str(project_root / config.data.humaneval_dir))
 
     print(f"Loading CodeSearchNet (max={config.data.codesearchnet_max_samples})...")
     problems = load_codesearchnet(
