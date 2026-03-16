@@ -185,13 +185,13 @@ class RLTrainer:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Eval-retrieve", leave=False)]
 
-            prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
+            prompts = [build_prompt(p, ctx.snippets[:1]) for p, ctx in zip(problems, contexts)]
             all_generated_codes = self.llm_client.generate_batch(
                 prompts, n=self.config.generator.n_samples, temperature=0.0
             )
             all_rewards = [
-                self.reward_fn.compute(p, codes)
-                for p, codes in zip(problems, all_generated_codes)
+                self.reward_fn.compute(p, codes, snippets=ctx.snippets)
+                for p, codes, ctx in zip(problems, all_generated_codes, contexts)
             ]
 
             pass_at_1 = compute_pass_at_k(all_rewards, k=1)
@@ -201,7 +201,9 @@ class RLTrainer:
             for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Eval-judge", leave=False):
                 if ctx.snippets:
                     scores = self.reward_fn.compute_snippet_rewards(p, ctx.snippets)
-                    all_rel_scores.append(sum(scores) / len(scores))
+                    weights = [1.0 / (i + 1) for i in range(len(scores))]
+                    total_w = sum(weights)
+                    all_rel_scores.append(sum(w * s for w, s in zip(weights, scores)) / total_w)
             avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
 
             return {

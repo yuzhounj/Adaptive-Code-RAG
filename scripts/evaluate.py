@@ -28,9 +28,9 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
     all_rewards = []
     for problem in tqdm(problems, desc="Evaluating"):
         context = retriever.retrieve(problem)
-        prompt = build_prompt(problem, context.snippets)
+        prompt = build_prompt(problem, context.snippets[:1])
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
-        rewards = reward_fn.compute(problem, generated_codes)
+        rewards = reward_fn.compute(problem, generated_codes, snippets=context.snippets)
         all_rewards.append(rewards)
     return all_rewards
 
