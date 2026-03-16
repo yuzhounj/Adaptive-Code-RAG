@@ -7,7 +7,7 @@ from typing import List, Optional
 from tqdm import tqdm
 
 from src.config import TrainingConfig
-from src.data.schema import HumanEvalProblem, RetrievedContext
+from src.data.schema import CodeSnippet, HumanEvalProblem
 from src.retriever.retriever import DifferentiableRetriever
 from src.retriever.encoder import CodeBERTEncoder
 from src.generator.llm_client import LLMClient
@@ -59,21 +59,14 @@ class RLTrainer:
         contexts = [self.retriever.retrieve(problem) for problem in batch]
         t1 = time.perf_counter()
 
-        # 2. Build all prompts and generate in parallel (main bottleneck → now concurrent)
-        prompts = [build_prompt(problem, ctx.snippets) for problem, ctx in zip(batch, contexts)]
-        all_generated_codes = self.llm_client.generate_batch(
-            prompts, n=self.config.generator.n_samples
-        )
-        t2 = time.perf_counter()
-
-        # 3. Compute rewards and REINFORCE loss per problem
+        # 2. Compute per-snippet relevance rewards (no LLM generation — CSN has no test cases)
         batch_losses = []
         batch_rewards = []
         batch_advantages = []
 
-        for problem, context, generated_codes in zip(batch, contexts, all_generated_codes):
+        for problem, context in zip(batch, contexts):
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
-                problem, generated_codes, snippets=context.snippets
+                problem, snippets=context.snippets
             )
             loss_output = self.policy.compute_loss(
                 log_probs=context.log_probs,
@@ -82,9 +75,9 @@ class RLTrainer:
             batch_losses.append(loss_output.loss)
             batch_rewards.append(loss_output.raw_reward)
             batch_advantages.append(loss_output.advantage)
-        t3 = time.perf_counter()
+        t2 = time.perf_counter()
 
-        # 4. Aggregate and backprop
+        # 3. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -93,23 +86,23 @@ class RLTrainer:
             self.config.rl.max_grad_norm,
         )
         self.optimizer.step()
-        t4 = time.perf_counter()
+        t3 = time.perf_counter()
 
         return {
             "loss": total_loss.item(),
             "mean_reward": sum(batch_rewards) / len(batch_rewards),
             "mean_advantage": sum(batch_advantages) / len(batch_advantages),
             "time/retrieve": t1 - t0,
-            "time/generate": t2 - t1,
-            "time/reward": t3 - t2,
-            "time/backward": t4 - t3,
-            "time/total": t4 - t0,
+            "time/reward": t2 - t1,
+            "time/backward": t3 - t2,
+            "time/total": t3 - t0,
         }
 
     def train(
         self,
         train_problems: List[HumanEvalProblem],
         eval_problems: Optional[List[HumanEvalProblem]] = None,
+        humaneval_snippets: Optional[List[CodeSnippet]] = None,
         resume_from: Optional[str] = None,
     ) -> None:
         """Main training loop."""
@@ -130,8 +123,8 @@ class RLTrainer:
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
 
         # Initial evaluation at step 0 (baseline before training)
-        if eval_problems and self.global_step == 0:
-            eval_metrics = self.evaluate(eval_problems)
+        if eval_problems and humaneval_snippets and self.global_step == 0:
+            eval_metrics = self.evaluate(eval_problems, humaneval_snippets)
             self.logger.log(eval_metrics, step=0, prefix="eval")
             print(f"\nStep 0 eval (baseline): {eval_metrics}")
 
@@ -149,7 +142,6 @@ class RLTrainer:
                 "loss": f"{metrics['loss']:.4f}",
                 "rew": f"{metrics['mean_reward']:.3f}",
                 "ret": f"{metrics['time/retrieve']:.1f}s",
-                "gen": f"{metrics['time/generate']:.1f}s",
                 "rwd": f"{metrics['time/reward']:.1f}s",
             })
             if self.global_step % rl_cfg.log_interval == 0:
@@ -157,11 +149,11 @@ class RLTrainer:
 
             # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:
-                self.retriever.refresh_index()
+                self.retriever.refresh_index(step=self.global_step)
 
             # Evaluation
-            if eval_problems and self.global_step % rl_cfg.eval_interval == 0:
-                eval_metrics = self.evaluate(eval_problems)
+            if eval_problems and humaneval_snippets and self.global_step % rl_cfg.eval_interval == 0:
+                eval_metrics = self.evaluate(eval_problems, humaneval_snippets)
                 self.logger.log(eval_metrics, step=self.global_step, prefix="eval")
                 print(f"\nStep {self.global_step} eval: {eval_metrics}")
 
@@ -173,11 +165,27 @@ class RLTrainer:
         pbar.close()
         self.logger.close()
 
-    def evaluate(self, problems: List[HumanEvalProblem]) -> dict:
-        """Evaluate pass@k on eval set."""
-        self.encoder.eval()  # disable dropout for deterministic eval
+    def evaluate(self, problems: List[HumanEvalProblem], humaneval_snippets: List[CodeSnippet]) -> dict:
+        """Evaluate on HumanEval using a fresh HumanEval index built with the current encoder.
+
+        Metrics: pass@1, pass@{n_samples}, avg_snippet_relevance.
+        The CSN index is temporarily swapped out and restored after eval.
+        """
+        self.encoder.eval()
+
+        # Save CSN index and replace with a fresh HumanEval index
+        saved_faiss = self.retriever.faiss_index
+        saved_snippets = self.retriever.corpus_snippets
+        from src.retriever.faiss_index import FaissIndex
+        eval_faiss = FaissIndex(embedding_dim=self.config.retriever.embedding_dim)
+        self.retriever.faiss_index = eval_faiss
+        self.retriever.build_index(humaneval_snippets)
+
         try:
-            contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Evaluating", leave=False)]
+            with torch.no_grad():
+                contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Eval-retrieve", leave=False)]
+
+            # Generate and execute
             prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
             all_generated_codes = self.llm_client.generate_batch(
                 prompts, n=self.config.generator.n_samples, temperature=0.0
@@ -190,11 +198,11 @@ class RLTrainer:
             pass_at_1 = compute_pass_at_k(all_rewards, k=1)
             pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
 
-            # Judge relevance: average top-k snippet relevance across eval problems
+            # Relevance of retrieved HumanEval snippets
             all_rel_scores = []
-            for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Judging", leave=False):
+            for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Eval-judge", leave=False):
                 if ctx.snippets:
-                    scores = self.reward_fn.score_relevance(p, ctx.snippets)
+                    scores = self.reward_fn.compute_snippet_rewards(p, ctx.snippets)
                     all_rel_scores.append(sum(scores) / len(scores))
             avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
 
@@ -204,4 +212,7 @@ class RLTrainer:
                 "avg_snippet_relevance": avg_relevance,
             }
         finally:
-            self.encoder.train()  # always restore training mode
+            # Always restore CSN index and training mode
+            self.retriever.faiss_index = saved_faiss
+            self.retriever.corpus_snippets = saved_snippets
+            self.encoder.train()

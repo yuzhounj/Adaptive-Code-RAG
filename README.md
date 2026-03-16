@@ -5,7 +5,7 @@ A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFO
 ## System Overview
 
 ```
-Query (HumanEval problem)
+Query (CodeSearchNet docstring / HumanEval problem)
         │
         ▼
 CodeBERT Encoder (trainable)
@@ -24,13 +24,13 @@ Retrieved Code Snippets
 Prompt Builder
         │
         ▼
-LLM Generator (Qwen2.5-Coder-7B via Ollama, frozen)
-        │  n=4 code completions
+LLM Generator (Qwen2.5-Coder via Ollama, frozen)
+        │  n=1 code completions
         ▼
-Reward Function (per-snippet)
-  - execution_reward: mean pass rate across n_samples generations
-  - relevance_score: LLM relevance score per snippet
-  - snippet_reward = 0.7 * execution_reward + 0.3 * relevance_score
+Reward Function (per-snippet, training)
+  - relevance_score: LLM score for how helpful the snippet is (0~1)
+  - snippet_reward = relevance_score
+  (execution reward only used during HumanEval evaluation, not training)
         │
         ▼
 REINFORCE Loss (per-snippet)
@@ -63,16 +63,17 @@ ollama serve
 
 ### Step 1: Build Corpus
 
-Build FAISS index from HumanEval canonical solutions (~164 snippets):
+Build the **CSN training corpus** (used during training only). The HumanEval eval corpus is built on-the-fly at each eval checkpoint — no separate build step needed.
 
 ```bash
 python scripts/build_corpus.py --config configs/default.yaml
 ```
 
 This will:
-1. Load HumanEval problems
-2. Encode canonical solutions with CodeBERT
-3. Save FAISS index to `data/corpus/`
+1. Load CodeSearchNet from HuggingFace (cached to `data/cache/`)
+2. Encode each snippet (docstring + code) with CodeBERT
+3. Save FAISS index and metadata to `data/corpus/`
+
 
 ### Step 2: Train
 
@@ -82,7 +83,7 @@ python scripts/train.py --config configs/default.yaml
 
 With overrides:
 ```bash
-python scripts/train.py rl.learning_rate=5e-6 rl.batch_size=4 reward.execution_weight=0.8
+python scripts/train.py rl.learning_rate=5e-6 rl.batch_size=4
 ```
 
 Resume from checkpoint:
@@ -124,6 +125,7 @@ Adaptive-Code-RAG/
 │   ├── data/
 │   │   ├── schema.py          # HumanEvalProblem, CodeSnippet, RetrievedContext
 │   │   ├── humaneval_loader.py
+│   │   ├── codesearchnet_loader.py  # CodeSearchNet → HumanEvalProblem adapter
 │   │   └── corpus_builder.py  # HumanEval corpus builder + metadata I/O
 │   ├── retriever/
 │   │   ├── encoder.py         # CodeBERT encoder (gradient-aware)
@@ -169,8 +171,8 @@ The FAISS index is rebuilt periodically (every `index_refresh_interval` steps) t
 ### REINFORCE with Baseline
 
 ```python
-advantage = reward - baseline
-loss = -log_prob.sum() * advantage - entropy_coeff * entropy
+advantages[i] = snippet_reward[i] - baseline
+loss = -sum_i(log_probs[i] * advantages[i]) - entropy_coeff * entropy
 ```
 
 - Baseline: exponential moving average (EMA) of rewards, decay=0.99
@@ -179,17 +181,15 @@ loss = -log_prob.sum() * advantage - entropy_coeff * entropy
 
 ### Per-Snippet Reward
 
-Each retrieved snippet gets an independent reward used directly in REINFORCE:
+Training uses CodeSearchNet which has no test cases, so the training reward is purely LLM relevance:
 
 ```
-snippet_reward[i] = execution_weight * execution_reward + relevance_weight * relevance_score[i]
+snippet_reward[i] = relevance_score[i]    # during training (CSN)
 ```
 
-- `execution_reward`: mean pass rate across n_samples code generations (shared by all k snippets)
-- `relevance_score[i]`: LLM score for how helpful snippet i is for solving the problem (0~1)
-- Default weights: `execution_weight=0.7`, `relevance_weight=0.3`
+Each snippet gets an independent gradient signal via REINFORCE, allowing the retriever to learn which snippets are most relevant rather than treating all k equally.
 
-This gives each snippet a differentiated gradient signal, allowing the retriever to learn which specific snippets are useful rather than treating all k equally.
+During **HumanEval evaluation**, execution reward (pass rate) is used separately to measure code generation quality — it is not mixed into the training signal.
 
 ### pass@k Metric
 
@@ -206,14 +206,13 @@ All hyperparameters are in `configs/default.yaml`. Key settings:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `retriever.top_k` | 5 | Number of retrieved snippets |
-| `retriever.index_refresh_interval` | 50 | Steps between FAISS rebuilds |
+| `rl.index_refresh_interval` | 100 | Steps between CSN FAISS index rebuilds |
 | `generator.n_samples` | 4 | Completions per problem for reward estimation |
 | `rl.learning_rate` | 1e-5 | AdamW learning rate |
 | `rl.batch_size` | 8 | Problems per gradient step |
 | `rl.max_steps` | 5000 | Total training steps |
 | `rl.entropy_coeff` | 0.01 | Entropy regularization weight |
-| `reward.execution_weight` | 0.7 | Weight for execution pass rate in snippet reward |
-| `reward.relevance_weight` | 0.3 | Weight for LLM relevance score in snippet reward |
+| `data.codesearchnet_max_samples` | 10000 | Max CodeSearchNet samples to load for training |
 
 ## Running Tests
 

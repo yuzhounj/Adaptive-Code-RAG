@@ -11,7 +11,6 @@ class RetrieverConfig:
     top_k: int = 5
     max_seq_len: int = 512
     embedding_dim: int = 768
-    index_refresh_interval: int = 50
     freeze_doc_encoder: bool = False
 
 
@@ -30,8 +29,6 @@ class RewardConfig:
     execution_timeout: int = 10
     relevance_model: str = "ollama/qwen2.5-coder:7b"
     relevance_api_base: str = "http://localhost:11434"
-    execution_weight: float = 0.7
-    relevance_weight: float = 0.3
 
 
 @dataclass
@@ -51,10 +48,10 @@ class RLConfig:
 
 @dataclass
 class DataConfig:
-    train_split: float = 0.8
     cache_dir: str = "data/cache"
     corpus_dir: str = "data/corpus"
     humaneval_dir: str = "data/humaneval"
+    codesearchnet_max_samples: int = 10000
 
 
 @dataclass

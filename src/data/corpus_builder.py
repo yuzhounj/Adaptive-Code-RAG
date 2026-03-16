@@ -21,6 +21,7 @@ def load_humaneval_corpus(
     return snippets
 
 
+
 def save_corpus_metadata(snippets: List[CodeSnippet], output_dir: str) -> None:
     """Save corpus snippets metadata to JSON."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)

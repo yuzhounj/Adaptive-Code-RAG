@@ -10,8 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
-from src.data.humaneval_loader import load_humaneval, split_humaneval
-from src.data.corpus_builder import load_corpus_metadata
+from src.data.humaneval_loader import load_humaneval
+from src.data.codesearchnet_loader import load_codesearchnet
+from src.data.corpus_builder import load_corpus_metadata, load_humaneval_corpus
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.retriever import DifferentiableRetriever
 from src.generator.llm_client import LLMClient
@@ -55,11 +56,16 @@ def main():
         device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    # Load data
-    print("Loading HumanEval...")
-    problems = load_humaneval(cache_dir=config.data.humaneval_dir)
-    train_problems, eval_problems = split_humaneval(problems, config.data.train_split)
-    print(f"Train: {len(train_problems)}, Eval: {len(eval_problems)}")
+    # Load data: CodeSearchNet for training, HumanEval for eval
+    print(f"Loading CodeSearchNet as training set (max={config.data.codesearchnet_max_samples})...")
+    train_problems = load_codesearchnet(
+        max_samples=config.data.codesearchnet_max_samples,
+        cache_dir=config.data.cache_dir,
+    )
+    print("Loading HumanEval as eval set...")
+    eval_problems = load_humaneval(cache_dir=config.data.humaneval_dir)
+    humaneval_snippets = load_humaneval_corpus(eval_problems)
+    print(f"Train: {len(train_problems)}, Eval: {len(eval_problems)}, HumanEval corpus: {len(humaneval_snippets)}")
 
     print("Loading corpus...")
     corpus_snippets = load_corpus_metadata(config.data.corpus_dir)
@@ -97,6 +103,7 @@ def main():
     trainer.train(
         train_problems=train_problems,
         eval_problems=eval_problems,
+        humaneval_snippets=humaneval_snippets,
         resume_from=args.resume,
     )
 

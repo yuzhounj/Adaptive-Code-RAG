@@ -2,8 +2,7 @@ import copy
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Tuple, Optional
-from dataclasses import dataclass
+from typing import List, Optional
 
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.faiss_index import FaissIndex
@@ -25,7 +24,6 @@ class DifferentiableRetriever:
         self.encoder = encoder
         self.faiss_index = FaissIndex(embedding_dim=config.embedding_dim)
         self.corpus_snippets: List[CodeSnippet] = []
-        self._step_count = 0
 
         if config.freeze_doc_encoder:
             self.doc_encoder = copy.deepcopy(encoder)
@@ -52,12 +50,12 @@ class DifferentiableRetriever:
         corpus_embeddings = np.concatenate(all_embeddings, axis=0).astype(np.float32)
         self.faiss_index.build(corpus_embeddings)
 
-    def refresh_index(self) -> None:
+    def refresh_index(self, step: int = 0) -> None:
         """Rebuild FAISS index with updated encoder weights. Called periodically."""
         if self.config.freeze_doc_encoder:
             return  # corpus embedding 固定，无需重建
         if self.corpus_snippets:
-            print(f"Refreshing FAISS index at step {self._step_count}...")
+            print(f"Refreshing FAISS index at step {step}...")
             self.build_index(self.corpus_snippets)
 
     def retrieve(
@@ -109,8 +107,3 @@ class DifferentiableRetriever:
             scores=scores_k,
         )
 
-    def compute_log_prob(self, context: RetrievedContext) -> torch.Tensor:
-        """Scalar log probability for REINFORCE: sum of log probs of retrieved set."""
-        if context.log_probs is None:
-            raise ValueError("RetrievedContext has no log_probs")
-        return context.log_probs.sum()

@@ -3,13 +3,13 @@
 import sys
 import argparse
 import torch
-from pathlib import Path
+from pathlib import Path  # needed for sys.path setup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
 from src.data.humaneval_loader import load_humaneval
-from src.data.corpus_builder import load_corpus_metadata
+from src.data.corpus_builder import load_humaneval_corpus
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.retriever import DifferentiableRetriever
 from src.generator.llm_client import LLMClient
@@ -33,14 +33,14 @@ def main():
     else:
         device = torch.device("cpu")
 
-    problems = load_humaneval(cache_dir=config.data.humaneval_dir)
+    all_problems = load_humaneval(cache_dir=config.data.humaneval_dir)
     if args.task_id:
-        problems = [p for p in problems if p.task_id == args.task_id]
+        problems = [p for p in all_problems if p.task_id == args.task_id]
         if not problems:
             print(f"Task {args.task_id} not found")
             return
     else:
-        problems = problems[:3]  # Demo: first 3
+        problems = all_problems[:3]  # Demo: first 3
 
     encoder = CodeBERTEncoder(
         model_name=config.retriever.model_name,
@@ -51,11 +51,8 @@ def main():
         load_checkpoint(args.checkpoint, encoder)
 
     retriever = DifferentiableRetriever(config=config.retriever, encoder=encoder)
-    corpus_snippets = load_corpus_metadata(config.data.corpus_dir)
-    index_path = str(Path(config.data.corpus_dir) / "faiss.index")
-    if Path(index_path).exists():
-        retriever.faiss_index.load(index_path)
-        retriever.corpus_snippets = corpus_snippets
+    humaneval_snippets = load_humaneval_corpus(all_problems)
+    retriever.build_index(humaneval_snippets)
 
     llm_client = LLMClient(config=config.generator)
 

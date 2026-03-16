@@ -3,7 +3,7 @@ retriever:
   top_k: 5
   max_seq_len: 512
   embedding_dim: 768
-  freeze_doc_encoder: true
+  freeze_doc_encoder: false
 
 generator:
   model: "ollama/qwen2.5:1.5b"
@@ -15,10 +15,8 @@ generator:
 
 reward:
   execution_timeout: 10
-  relevance_model: "ollama/qwen2.5-coder:14b"
+  relevance_model: "ollama/qwen2.5:1.5b" #ollama/qwen2.5-coder:14b
   relevance_api_base: "http://localhost:11434"
-  execution_weight: 0.5
-  relevance_weight: 0.5
 
 rl:
   learning_rate: 1.0e-5
@@ -31,13 +29,13 @@ rl:
   eval_interval: 200
   checkpoint_interval: 1000
   log_interval: 10
-  index_refresh_interval: 999999
+  index_refresh_interval: 100
 
 data:
-  train_split: 0.8
   cache_dir: "data/cache"
   corpus_dir: "data/corpus"
   humaneval_dir: "data/humaneval"
+  codesearchnet_max_samples: 10000
 
 logging:
   use_wandb: false

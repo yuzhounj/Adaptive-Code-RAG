@@ -50,7 +50,7 @@ class REINFORCEPolicy:
     def compute_loss(
         self,
         log_probs: torch.Tensor,       # [k] log probs of retrieved snippets
-        snippet_rewards: List[float],  # [k] per-snippet rewards
+        snippet_rewards: List[float],  # [k] per-snippet relevance rewards
     ) -> PolicyLossOutput:
         """
         Compute per-snippet REINFORCE loss.
@@ -60,7 +60,7 @@ class REINFORCEPolicy:
 
         Args:
             log_probs: gradient-attached log probs from retriever [k]
-            snippet_rewards: per-snippet rewards combining execution + relevance [k]
+            snippet_rewards: per-snippet LLM relevance scores [k]
 
         Returns:
             PolicyLossOutput with loss tensor, mean advantage, and entropy

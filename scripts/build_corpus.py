@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot script to encode HumanEval canonical solutions and build FAISS index."""
+"""Build CodeSearchNet corpus and FAISS index for retriever training."""
 import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import sys
@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
-from src.data.humaneval_loader import load_humaneval
+from src.data.codesearchnet_loader import load_codesearchnet
 from src.data.corpus_builder import load_humaneval_corpus, save_corpus_metadata
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.faiss_index import FaissIndex
@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build HumanEval corpus and FAISS index")
+    parser = argparse.ArgumentParser(description="Build CodeSearchNet corpus and FAISS index")
     parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
@@ -27,14 +27,13 @@ def main():
 
     project_root = Path(__file__).parent.parent
 
-    # Load HumanEval
-    print("Loading HumanEval...")
-    humaneval_dir = str(project_root / config.data.humaneval_dir)
-    humaneval = load_humaneval(cache_dir=humaneval_dir)
-
-    # Build corpus from canonical solutions
-    snippets = load_humaneval_corpus(humaneval)
-    print(f"Loaded {len(snippets)} snippets from HumanEval")
+    print(f"Loading CodeSearchNet (max={config.data.codesearchnet_max_samples})...")
+    problems = load_codesearchnet(
+        max_samples=config.data.codesearchnet_max_samples,
+        cache_dir=str(project_root / config.data.cache_dir),
+    )
+    snippets = load_humaneval_corpus(problems)
+    print(f"Loaded {len(snippets)} snippets from CodeSearchNet")
 
     # Save corpus metadata
     corpus_dir = str(project_root / config.data.corpus_dir)

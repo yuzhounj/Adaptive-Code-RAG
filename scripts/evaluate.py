@@ -10,8 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
-from src.data.humaneval_loader import load_humaneval, split_humaneval
-from src.data.corpus_builder import load_corpus_metadata
+from src.data.humaneval_loader import load_humaneval
+from src.data.corpus_builder import load_humaneval_corpus
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.retriever import DifferentiableRetriever
 from src.generator.llm_client import LLMClient
@@ -26,6 +26,8 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
     all_rewards = []
     for problem in tqdm(problems, desc="Evaluating"):
         context = retriever.retrieve(problem)
+        # Leave-one-out: exclude the current problem's own canonical solution
+        context.snippets = [s for s in context.snippets if s.snippet_id != problem.task_id]
         prompt = build_prompt(problem, context.snippets)
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes)
@@ -34,11 +36,10 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate CodeBERT retriever")
+    parser = argparse.ArgumentParser(description="Evaluate CodeBERT retriever on HumanEval")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--checkpoint", default=None, help="Checkpoint to evaluate")
     parser.add_argument("--baseline", action="store_true", help="Evaluate no-retrieval baseline")
-    parser.add_argument("--split", default="eval", choices=["train", "eval", "all"])
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -50,16 +51,7 @@ def main():
         device = torch.device("cpu")
 
     problems = load_humaneval(cache_dir=config.data.humaneval_dir)
-    train_problems, eval_problems = split_humaneval(problems, config.data.train_split)
-
-    if args.split == "train":
-        eval_set = train_problems
-    elif args.split == "eval":
-        eval_set = eval_problems
-    else:
-        eval_set = problems
-
-    print(f"Evaluating on {len(eval_set)} problems")
+    print(f"Evaluating on {len(problems)} HumanEval problems")
 
     encoder = CodeBERTEncoder(
         model_name=config.retriever.model_name,
@@ -71,32 +63,26 @@ def main():
 
     retriever = DifferentiableRetriever(config=config.retriever, encoder=encoder)
 
-    corpus_snippets = load_corpus_metadata(config.data.corpus_dir)
-    index_path = str(Path(config.data.corpus_dir) / "faiss.index")
-
     if not args.baseline:
-        if Path(index_path).exists():
-            retriever.faiss_index.load(index_path)
-            retriever.corpus_snippets = corpus_snippets
-        else:
-            retriever.build_index(corpus_snippets)
+        # Build HumanEval corpus index with the current encoder
+        humaneval_snippets = load_humaneval_corpus(problems)
+        retriever.build_index(humaneval_snippets)
 
     llm_client = LLMClient(config=config.generator)
     reward_fn = RewardFunction(config=config.reward)
 
     n_samples = config.generator.n_samples
-    encoder.eval()  # disable dropout for deterministic evaluation
+    encoder.eval()
 
     if args.baseline:
-        # No-retrieval baseline: empty snippets
         all_rewards = []
-        for problem in tqdm(eval_set, desc="Baseline"):
+        for problem in tqdm(problems, desc="Baseline"):
             prompt = build_prompt(problem, snippets=[])
             generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
             rewards = reward_fn.compute(problem, generated_codes)
             all_rewards.append(rewards)
     else:
-        all_rewards = evaluate_model(eval_set, retriever, llm_client, reward_fn, n_samples)
+        all_rewards = evaluate_model(problems, retriever, llm_client, reward_fn, n_samples)
 
     pass_at_1 = compute_pass_at_k(all_rewards, k=1)
     pass_at_n = compute_pass_at_k(all_rewards, k=n_samples)
