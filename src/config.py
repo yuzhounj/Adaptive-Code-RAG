@@ -22,6 +22,7 @@ class GeneratorConfig:
     temperature: float = 0.8
     max_tokens: int = 512
     timeout: int = 30
+    max_concurrency: int = 4
 
 
 @dataclass
@@ -29,6 +30,7 @@ class RewardConfig:
     execution_timeout: int = 10
     relevance_model: str = "ollama/qwen2.5-coder:7b"
     relevance_api_base: str = "http://localhost:11434"
+    max_concurrency: int = 4
 
 
 @dataclass
@@ -52,6 +54,7 @@ class DataConfig:
     corpus_dir: str = "data/corpus"
     humaneval_dir: str = "data/humaneval"
     codesearchnet_max_samples: int = 10000
+    humaneval_eval_size: int = 50
 
 
 @dataclass

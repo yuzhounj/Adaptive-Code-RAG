@@ -1,6 +1,7 @@
 import asyncio
 from typing import List, Optional
 import litellm
+from tqdm import tqdm
 from src.config import GeneratorConfig
 
 _FENCE = "```"
@@ -72,9 +73,19 @@ class LLMClient:
         return asyncio.run(self.generate_async(prompt, n=n, temperature=temperature))
 
     async def generate_batch_async(self, prompts: List[str], n: int = 1, temperature: Optional[float] = None) -> List[List[str]]:
-        """Generate completions for a batch of prompts concurrently."""
-        tasks = [self.generate_async(prompt, n=n, temperature=temperature) for prompt in prompts]
-        return await asyncio.gather(*tasks)
+        """Generate completions in serial chunks of max_concurrency."""
+        results = []
+        chunk_size = self.config.max_concurrency
+        pbar = tqdm(total=len(prompts), desc="Eval-generate", leave=False)
+        for i in range(0, len(prompts), chunk_size):
+            chunk = prompts[i:i + chunk_size]
+            chunk_results = await asyncio.gather(
+                *[self.generate_async(p, n=n, temperature=temperature) for p in chunk]
+            )
+            results.extend(chunk_results)
+            pbar.update(len(chunk))
+        pbar.close()
+        return results
 
     def generate_batch(self, prompts: List[str], n: int = 1, temperature: Optional[float] = None) -> List[List[str]]:
         """Synchronous batch generation."""

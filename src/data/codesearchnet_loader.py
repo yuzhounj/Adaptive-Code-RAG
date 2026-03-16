@@ -19,7 +19,7 @@ def load_codesearchnet(
     """
     from datasets import load_dataset
 
-    ds = load_dataset("code_search_net", language, split="train", cache_dir=cache_dir, trust_remote_code=True)
+    ds = load_dataset("code_search_net", language, split="train", cache_dir=cache_dir)
 
     # Filter empty docstrings / code
     ds = ds.filter(

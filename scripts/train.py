@@ -4,6 +4,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import argparse
+import random
 import torch
 from pathlib import Path
 
@@ -64,6 +65,9 @@ def main():
     )
     print("Loading HumanEval as eval set...")
     eval_problems = load_humaneval(cache_dir=config.data.humaneval_dir)
+    eval_size = config.data.humaneval_eval_size
+    if eval_size < len(eval_problems):
+        eval_problems = random.Random(42).sample(eval_problems, eval_size)
     humaneval_snippets = load_humaneval_corpus(eval_problems)
     print(f"Train: {len(train_problems)}, Eval: {len(eval_problems)}, HumanEval corpus: {len(humaneval_snippets)}")
 

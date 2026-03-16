@@ -4,6 +4,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import argparse
+import random
 import torch
 from pathlib import Path
 
@@ -26,8 +27,6 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
     all_rewards = []
     for problem in tqdm(problems, desc="Evaluating"):
         context = retriever.retrieve(problem)
-        # Leave-one-out: exclude the current problem's own canonical solution
-        context.snippets = [s for s in context.snippets if s.snippet_id != problem.task_id]
         prompt = build_prompt(problem, context.snippets)
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes)
@@ -51,6 +50,9 @@ def main():
         device = torch.device("cpu")
 
     problems = load_humaneval(cache_dir=config.data.humaneval_dir)
+    eval_size = config.data.humaneval_eval_size
+    if eval_size < len(problems):
+        problems = random.Random(42).sample(problems, eval_size)
     print(f"Evaluating on {len(problems)} HumanEval problems")
 
     encoder = CodeBERTEncoder(
@@ -63,6 +65,8 @@ def main():
 
     retriever = DifferentiableRetriever(config=config.retriever, encoder=encoder)
 
+    encoder.eval()
+
     if not args.baseline:
         # Build HumanEval corpus index with the current encoder
         humaneval_snippets = load_humaneval_corpus(problems)
@@ -72,17 +76,17 @@ def main():
     reward_fn = RewardFunction(config=config.reward)
 
     n_samples = config.generator.n_samples
-    encoder.eval()
 
-    if args.baseline:
-        all_rewards = []
-        for problem in tqdm(problems, desc="Baseline"):
-            prompt = build_prompt(problem, snippets=[])
-            generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
-            rewards = reward_fn.compute(problem, generated_codes)
-            all_rewards.append(rewards)
-    else:
-        all_rewards = evaluate_model(problems, retriever, llm_client, reward_fn, n_samples)
+    with torch.no_grad():
+        if args.baseline:
+            all_rewards = []
+            for problem in tqdm(problems, desc="Baseline"):
+                prompt = build_prompt(problem, snippets=[])
+                generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
+                rewards = reward_fn.compute(problem, generated_codes)
+                all_rewards.append(rewards)
+        else:
+            all_rewards = evaluate_model(problems, retriever, llm_client, reward_fn, n_samples)
 
     pass_at_1 = compute_pass_at_k(all_rewards, k=1)
     pass_at_n = compute_pass_at_k(all_rewards, k=n_samples)

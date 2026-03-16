@@ -61,8 +61,16 @@ class SnippetRelevanceJudge:
     async def score_batch_async(
         self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
     ) -> List[float]:
-        tasks = [self.score_async(problem, snippet) for snippet in snippets]
-        return await asyncio.gather(*tasks)
+        """Score snippets in serial chunks of max_concurrency."""
+        results = []
+        chunk_size = self.config.max_concurrency
+        for i in range(0, len(snippets), chunk_size):
+            chunk = snippets[i:i + chunk_size]
+            chunk_results = await asyncio.gather(
+                *[self.score_async(problem, s) for s in chunk]
+            )
+            results.extend(chunk_results)
+        return results
 
     def score_batch(
         self, problem: HumanEvalProblem, snippets: List[CodeSnippet]

@@ -1,6 +1,6 @@
 retriever:
   model_name: "microsoft/codebert-base"
-  top_k: 5
+  top_k: 3
   max_seq_len: 512
   embedding_dim: 768
   freeze_doc_encoder: false
@@ -12,11 +12,13 @@ generator:
   temperature: 0.8
   max_tokens: 512
   timeout: 60
+  max_concurrency: 4
 
 reward:
   execution_timeout: 10
   relevance_model: "ollama/qwen2.5:1.5b" #ollama/qwen2.5-coder:14b
   relevance_api_base: "http://localhost:11434"
+  max_concurrency: 4
 
 rl:
   learning_rate: 1.0e-5
@@ -35,7 +37,8 @@ data:
   cache_dir: "data/cache"
   corpus_dir: "data/corpus"
   humaneval_dir: "data/humaneval"
-  codesearchnet_max_samples: 10000
+  codesearchnet_max_samples: 5000
+  humaneval_eval_size: 50
 
 logging:
   use_wandb: false

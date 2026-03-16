@@ -185,7 +185,6 @@ class RLTrainer:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Eval-retrieve", leave=False)]
 
-            # Generate and execute
             prompts = [build_prompt(p, ctx.snippets) for p, ctx in zip(problems, contexts)]
             all_generated_codes = self.llm_client.generate_batch(
                 prompts, n=self.config.generator.n_samples, temperature=0.0
@@ -198,7 +197,6 @@ class RLTrainer:
             pass_at_1 = compute_pass_at_k(all_rewards, k=1)
             pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
 
-            # Relevance of retrieved HumanEval snippets
             all_rel_scores = []
             for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Eval-judge", leave=False):
                 if ctx.snippets:
