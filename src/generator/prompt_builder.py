@@ -15,13 +15,11 @@ def build_prompt(
         lines.append("# You MUST base your solution closely on these examples — reuse their logic, structure,")
         lines.append("# and edge-case handling (including boundary conditions). Do NOT ignore them.")
         for i, snippet in enumerate(snippets, 1):
-            code_preview = snippet.code[:max_snippet_chars]
-            if len(snippet.code) > max_snippet_chars:
+            full_code = (snippet.docstring or "") + snippet.code
+            code_preview = full_code[:max_snippet_chars]
+            if len(full_code) > max_snippet_chars:
                 code_preview += "..."
-            doc_preview = snippet.docstring[:100] if snippet.docstring else ""
             lines.append(f"\n## Example {i}:")
-            if doc_preview:
-                lines.append(f"# {doc_preview}")
             lines.append("```python")
             lines.append(code_preview)
             lines.append("```")

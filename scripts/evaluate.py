@@ -31,8 +31,7 @@ def evaluate_model(problems, retriever, llm_client, reward_fn, n_samples):
         context = retriever.retrieve(problem)
         prompt = build_prompt(problem, context.snippets[:1])
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
-        rel_scores = reward_fn.compute_snippet_rewards(problem, context.snippets) if context.snippets else None
-        rewards = reward_fn.compute(problem, generated_codes, snippets=context.snippets, relevance_scores=rel_scores)
+        rewards = reward_fn.compute(problem, generated_codes, snippets=context.snippets)
         all_rewards.append(rewards)
     return all_rewards
 
