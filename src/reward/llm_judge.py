@@ -45,6 +45,7 @@ class SnippetRelevanceJudge:
             problem_prompt=problem.prompt,
             snippet_code=snippet.code,
         )
+        text = ""
         try:
             response = await litellm.acompletion(
                 model=self.config.relevance_model,
@@ -55,10 +56,11 @@ class SnippetRelevanceJudge:
             )
             text = response.choices[0].message.content.strip()
             score = float(text)
-            return max(0.0, min(1.0, score))
+            if score not in (0.0, 0.3, 0.7, 1.0):
+                raise ValueError(f"Unexpected score value: {score!r}")
+            return score
         except Exception as e:
-            print(f"Relevance judge error: {e}")
-            return 0.0
+            raise RuntimeError(f"Relevance judge failed (response: {text!r}): {e}") from e
 
     async def score_batch_async(
         self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
