@@ -167,18 +167,40 @@ class RLTrainer:
 
         No index swap, no code generation. Metrics: avg_snippet_relevance (position-weighted).
         """
+        eval_logs_root = os.path.join("outputs", "eval_logs")
+        if self.global_step == 0 and os.path.exists(eval_logs_root):
+            shutil.rmtree(eval_logs_root)
+        log_dir = os.path.join(eval_logs_root, f"step_{self.global_step}")
+        os.makedirs(log_dir, exist_ok=True)
+
         self.encoder.eval()
         try:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(eval_problems, desc="Eval-retrieve", leave=False)]
 
             all_rel_scores = []
-            for p, ctx in tqdm(zip(eval_problems, contexts), total=len(eval_problems), desc="Eval-judge", leave=False):
+            for case_idx, (p, ctx) in enumerate(tqdm(zip(eval_problems, contexts), total=len(eval_problems), desc="Eval-judge", leave=False)):
                 if ctx.snippets:
                     scores = self.reward_fn.compute_snippet_rewards(p, ctx.snippets)
                     weights = [1.0 / (i + 1) for i in range(len(scores))]
                     total_w = sum(weights)
-                    all_rel_scores.append(sum(w * s for w, s in zip(weights, scores)) / total_w)
+                    weighted_relevance = sum(w * s for w, s in zip(weights, scores)) / total_w
+                    all_rel_scores.append(weighted_relevance)
+
+                    if case_idx < 10:
+                        sim_scores = ctx.scores.tolist() if hasattr(ctx.scores, "tolist") else list(ctx.scores)
+                        task_id_safe = p.task_id.replace("/", "_")
+                        fname = os.path.join(log_dir, f"case_{case_idx:02d}_{task_id_safe}.txt")
+                        lines = [f"# Case: {p.task_id}\n", "## Prompt\n", p.prompt, "\n## Retrieved Snippets\n"]
+                        for i, snippet in enumerate(ctx.snippets):
+                            sim = sim_scores[i] if i < len(sim_scores) else float("nan")
+                            llm_score = scores[i] if i < len(scores) else float("nan")
+                            lines.append(f"\n### Snippet {i + 1}  |  LLM Score: {llm_score:.4f}  |  Similarity: {sim:.4f}\n")
+                            lines.append(f"Docstring: {snippet.docstring}\n")
+                            lines.append(f"Code:\n{snippet.code}\n")
+                        lines.append(f"\n## Weighted Relevance: {weighted_relevance:.4f}\n")
+                        with open(fname, "w", encoding="utf-8") as f:
+                            f.writelines(lines)
 
             avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
             return {"avg_snippet_relevance": avg_relevance}
