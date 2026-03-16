@@ -7,16 +7,14 @@ from typing import List, Optional
 from tqdm import tqdm
 
 from src.config import TrainingConfig
-from src.data.schema import CodeSnippet, HumanEvalProblem
+from src.data.schema import HumanEvalProblem
 from src.retriever.retriever import DifferentiableRetriever
 from src.retriever.encoder import CodeBERTEncoder
 from src.generator.llm_client import LLMClient
-from src.generator.prompt_builder import build_prompt
 from src.reward.reward_fn import RewardFunction
 from src.rl.policy import REINFORCEPolicy
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logging_utils import TrainingLogger
-from src.utils.metrics import compute_pass_at_k
 
 
 class RLTrainer:
@@ -102,7 +100,6 @@ class RLTrainer:
         self,
         train_problems: List[HumanEvalProblem],
         eval_problems: Optional[List[HumanEvalProblem]] = None,
-        humaneval_snippets: Optional[List[CodeSnippet]] = None,
         resume_from: Optional[str] = None,
     ) -> None:
         """Main training loop."""
@@ -123,8 +120,8 @@ class RLTrainer:
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
 
         # Initial evaluation at step 0 (baseline before training)
-        if eval_problems and humaneval_snippets and self.global_step == 0:
-            eval_metrics = self.evaluate(eval_problems, humaneval_snippets)
+        if eval_problems and self.global_step == 0:
+            eval_metrics = self.evaluate(eval_problems)
             self.logger.log(eval_metrics, step=0, prefix="eval")
             print(f"\nStep 0 eval (baseline): {eval_metrics}")
 
@@ -152,8 +149,8 @@ class RLTrainer:
                 self.retriever.refresh_index(step=self.global_step)
 
             # Evaluation
-            if eval_problems and humaneval_snippets and self.global_step % rl_cfg.eval_interval == 0:
-                eval_metrics = self.evaluate(eval_problems, humaneval_snippets)
+            if eval_problems and self.global_step % rl_cfg.eval_interval == 0:
+                eval_metrics = self.evaluate(eval_problems)
                 self.logger.log(eval_metrics, step=self.global_step, prefix="eval")
                 print(f"\nStep {self.global_step} eval: {eval_metrics}")
 
@@ -165,54 +162,25 @@ class RLTrainer:
         pbar.close()
         self.logger.close()
 
-    def evaluate(self, problems: List[HumanEvalProblem], humaneval_snippets: List[CodeSnippet]) -> dict:
-        """Evaluate on HumanEval using a fresh HumanEval index built with the current encoder.
+    def evaluate(self, eval_problems: List[HumanEvalProblem]) -> dict:
+        """Evaluate retrieval quality on held-out CSN problems using the current CSN index.
 
-        Metrics: pass@1, pass@{n_samples}, avg_snippet_relevance.
-        The CSN index is temporarily swapped out and restored after eval.
+        No index swap, no code generation. Metrics: avg_snippet_relevance (position-weighted).
         """
         self.encoder.eval()
-
-        # Save CSN index and replace with a fresh HumanEval index
-        saved_faiss = self.retriever.faiss_index
-        saved_snippets = self.retriever.corpus_snippets
-        from src.retriever.faiss_index import FaissIndex
-        eval_faiss = FaissIndex(embedding_dim=self.config.retriever.embedding_dim)
-        self.retriever.faiss_index = eval_faiss
-        self.retriever.build_index(humaneval_snippets)
-
         try:
             with torch.no_grad():
-                contexts = [self.retriever.retrieve(p) for p in tqdm(problems, desc="Eval-retrieve", leave=False)]
-
-            prompts = [build_prompt(p, ctx.snippets[:1]) for p, ctx in zip(problems, contexts)]
-            all_generated_codes = self.llm_client.generate_batch(
-                prompts, n=self.config.generator.n_samples, temperature=0.0
-            )
-            all_rewards = [
-                self.reward_fn.compute(p, codes, snippets=ctx.snippets)
-                for p, codes, ctx in zip(problems, all_generated_codes, contexts)
-            ]
-
-            pass_at_1 = compute_pass_at_k(all_rewards, k=1)
-            pass_at_k = compute_pass_at_k(all_rewards, k=self.config.generator.n_samples)
+                contexts = [self.retriever.retrieve(p) for p in tqdm(eval_problems, desc="Eval-retrieve", leave=False)]
 
             all_rel_scores = []
-            for p, ctx in tqdm(zip(problems, contexts), total=len(problems), desc="Eval-judge", leave=False):
+            for p, ctx in tqdm(zip(eval_problems, contexts), total=len(eval_problems), desc="Eval-judge", leave=False):
                 if ctx.snippets:
                     scores = self.reward_fn.compute_snippet_rewards(p, ctx.snippets)
                     weights = [1.0 / (i + 1) for i in range(len(scores))]
                     total_w = sum(weights)
                     all_rel_scores.append(sum(w * s for w, s in zip(weights, scores)) / total_w)
-            avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
 
-            return {
-                "pass@1": pass_at_1,
-                f"pass@{self.config.generator.n_samples}": pass_at_k,
-                "avg_snippet_relevance": avg_relevance,
-            }
+            avg_relevance = sum(all_rel_scores) / len(all_rel_scores) if all_rel_scores else 0.0
+            return {"avg_snippet_relevance": avg_relevance}
         finally:
-            # Always restore CSN index and training mode
-            self.retriever.faiss_index = saved_faiss
-            self.retriever.corpus_snippets = saved_snippets
             self.encoder.train()

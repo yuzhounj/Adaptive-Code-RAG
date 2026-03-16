@@ -54,6 +54,7 @@ class DataConfig:
     corpus_dir: str = "data/corpus"
     humaneval_dir: str = "data/humaneval"
     codesearchnet_max_samples: int = 10000
+    csn_eval_size: int = 100
     humaneval_eval_size: int = 50
 
 
