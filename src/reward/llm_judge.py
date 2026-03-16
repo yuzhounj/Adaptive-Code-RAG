@@ -1,5 +1,7 @@
 import asyncio
+import os
 from typing import List
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 import litellm
 from src.config import RewardConfig
 from src.data.schema import CodeSnippet, HumanEvalProblem

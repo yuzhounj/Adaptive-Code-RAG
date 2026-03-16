@@ -1,5 +1,7 @@
 import asyncio
+import os
 from typing import List, Optional
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 import litellm
 from tqdm import tqdm
 from src.config import GeneratorConfig
