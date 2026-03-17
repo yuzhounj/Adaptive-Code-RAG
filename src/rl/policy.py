@@ -79,9 +79,10 @@ class REINFORCEPolicy:
         )
 
         # Normalize advantage scale for stable learning rate across batches.
-        # Preserves sign so negative advantages suppress bad retrievals.
-        adv_std = raw_advantages.std() + 1e-8
-        advantages = raw_advantages / adv_std
+        # Skip normalization when all rewards are equal (std ≈ 0) to avoid
+        # dividing by near-zero and exploding the loss.
+        adv_std = raw_advantages.std()
+        advantages = raw_advantages / (adv_std + 1e-8) if adv_std > 1e-4 else raw_advantages
 
         # Per-snippet policy gradient loss
         pg_loss = -(log_probs * advantages).sum()
