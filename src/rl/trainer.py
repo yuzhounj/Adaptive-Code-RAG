@@ -170,15 +170,15 @@ class RLTrainer:
                 )
                 self._metrics_log.flush()
 
-            # Refresh FAISS index
-            if self.global_step % rl_cfg.index_refresh_interval == 0:
-                self.retriever.refresh_index(step=self.global_step)
-
             # Evaluation
             if eval_problems and self.global_step % rl_cfg.eval_interval == 0:
                 eval_metrics = self.evaluate(eval_problems)
                 self.logger.log(eval_metrics, step=self.global_step, prefix="eval")
                 print(f"\nStep {self.global_step} eval: {eval_metrics}")
+
+            # Refresh FAISS index
+            if self.global_step % rl_cfg.index_refresh_interval == 0:
+                self.retriever.refresh_index(step=self.global_step)
 
             # Checkpoint
             if self.global_step % rl_cfg.checkpoint_interval == 0:
