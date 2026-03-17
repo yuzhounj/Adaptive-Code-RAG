@@ -33,6 +33,8 @@ class PolicyLossOutput:
     advantage: float
     entropy: float
     raw_reward: float
+    pg_loss: float
+    baseline_val: float
 
 
 class REINFORCEPolicy:
@@ -93,4 +95,6 @@ class REINFORCEPolicy:
             advantage=advantages.mean().item(),
             entropy=entropy.item(),
             raw_reward=mean_reward,
+            pg_loss=pg_loss.item(),
+            baseline_val=baseline_val,
         )

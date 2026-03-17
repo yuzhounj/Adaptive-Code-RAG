@@ -61,6 +61,9 @@ class RLTrainer:
         batch_losses = []
         batch_rewards = []
         batch_advantages = []
+        batch_entropies = []
+        batch_pg_losses = []
+        batch_baselines = []
 
         for problem, context in zip(batch, contexts):
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
@@ -73,23 +76,35 @@ class RLTrainer:
             batch_losses.append(loss_output.loss)
             batch_rewards.append(loss_output.raw_reward)
             batch_advantages.append(loss_output.advantage)
+            batch_entropies.append(loss_output.entropy)
+            batch_pg_losses.append(loss_output.pg_loss)
+            batch_baselines.append(loss_output.baseline_val)
         t2 = time.perf_counter()
 
         # 3. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
         self.optimizer.zero_grad()
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(
+        grad_norm = torch.nn.utils.clip_grad_norm_(
             self.encoder.model.parameters(),
             self.config.rl.max_grad_norm,
-        )
+        ).item()
         self.optimizer.step()
         t3 = time.perf_counter()
 
+        n = len(batch_rewards)
+        mean_reward = sum(batch_rewards) / n
+        reward_std = (sum((r - mean_reward) ** 2 for r in batch_rewards) / n) ** 0.5
+
         return {
             "loss": total_loss.item(),
-            "mean_reward": sum(batch_rewards) / len(batch_rewards),
-            "mean_advantage": sum(batch_advantages) / len(batch_advantages),
+            "pg_loss": sum(batch_pg_losses) / n,
+            "entropy": sum(batch_entropies) / n,
+            "mean_reward": mean_reward,
+            "reward_std": reward_std,
+            "mean_advantage": sum(batch_advantages) / n,
+            "baseline": sum(batch_baselines) / n,
+            "grad_norm": grad_norm,
             "time/retrieve": t1 - t0,
             "time/reward": t2 - t1,
             "time/backward": t3 - t2,
@@ -119,9 +134,10 @@ class RLTrainer:
 
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
 
+        # Always rebuild index on startup to ensure corpus embeddings match current encoder
+        self.retriever.refresh_index(step=self.global_step)
+
         # Initial evaluation at step 0 (baseline before training)
-        if self.global_step == 0:
-            self.retriever.refresh_index(step=0)
         if eval_problems and self.global_step == 0:
             eval_metrics = self.evaluate(eval_problems)
             self.logger.log(eval_metrics, step=0, prefix="eval")
@@ -140,11 +156,17 @@ class RLTrainer:
             pbar.set_postfix({
                 "loss": f"{metrics['loss']:.4f}",
                 "rew": f"{metrics['mean_reward']:.3f}",
-                "ret": f"{metrics['time/retrieve']:.1f}s",
-                "rwd": f"{metrics['time/reward']:.1f}s",
             })
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
+                print(
+                    f"\n[step {self.global_step}] "
+                    f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} | "
+                    f"rew={metrics['mean_reward']:.4f}±{metrics['reward_std']:.4f}  "
+                    f"adv={metrics['mean_advantage']:.4f}  base={metrics['baseline']:.4f} | "
+                    f"gnorm={metrics['grad_norm']:.4f} | "
+                    f"t_ret={metrics['time/retrieve']:.1f}s  t_rew={metrics['time/reward']:.1f}s"
+                )
 
             # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:

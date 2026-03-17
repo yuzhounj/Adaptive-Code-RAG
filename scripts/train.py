@@ -80,14 +80,8 @@ def main():
 
     retriever = DifferentiableRetriever(config=config.retriever, encoder=encoder)
 
-    # Load or build FAISS index
-    index_path = str(Path(config.data.corpus_dir) / "faiss.index")
-    if Path(index_path).exists():
-        retriever.faiss_index.load(index_path)
-        retriever.corpus_snippets = corpus_snippets
-    else:
-        print("Building FAISS index...")
-        retriever.build_index(corpus_snippets)
+    # corpus_snippets must be set; index will be rebuilt at trainer startup
+    retriever.corpus_snippets = corpus_snippets
 
     llm_client = LLMClient(config=config.generator)
     reward_fn = RewardFunction(config=config.reward)
