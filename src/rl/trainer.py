@@ -120,6 +120,8 @@ class RLTrainer:
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
 
         # Initial evaluation at step 0 (baseline before training)
+        if self.global_step == 0:
+            self.retriever.refresh_index(step=0)
         if eval_problems and self.global_step == 0:
             eval_metrics = self.evaluate(eval_problems)
             self.logger.log(eval_metrics, step=0, prefix="eval")
