@@ -23,9 +23,14 @@ python scripts/train.py
 python scripts/train.py rl.learning_rate=5e-6 data.codesearchnet_max_samples=5000   # with overrides
 python scripts/train.py --resume outputs/checkpoints/step_500.pt
 
-# Evaluate
+# Evaluate (single config)
 python scripts/evaluate.py --checkpoint outputs/checkpoints/step_5000.pt
 python scripts/evaluate.py --baseline   # no-retrieval baseline
+
+# Compare all three configs and export bar chart + TensorBoard
+python scripts/compare_eval.py                                                      # baseline + pretrained
+python scripts/compare_eval.py --checkpoint outputs/checkpoints/step_5000.pt       # all three columns
+tensorboard --logdir outputs/logs/eval_comparison                                   # view results
 
 # Inference demo
 python scripts/generate_samples.py --task-id "HumanEval/42" --n 4
