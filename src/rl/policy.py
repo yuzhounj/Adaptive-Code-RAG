@@ -67,12 +67,14 @@ class REINFORCEPolicy:
         """
         mean_reward = sum(snippet_rewards) / len(snippet_rewards) if snippet_rewards else 0.0
 
-        # Compute per-snippet advantages against shared baseline
+        # Compute per-snippet advantages: clip negative advantages to zero.
+        # This prevents all-zero-reward batches from producing destructive
+        # negative gradients while preserving the absolute quality signal.
         baseline_val = self.baseline.get()
         self.baseline.update(mean_reward)
 
         advantages = torch.tensor(
-            [r - baseline_val for r in snippet_rewards],
+            [max(r - baseline_val, 0.0) for r in snippet_rewards],
             dtype=torch.float32,
             device=log_probs.device,
         )
