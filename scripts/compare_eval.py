@@ -78,17 +78,38 @@ def run_baseline(problems, llm_client, reward_fn, n_samples):
     return all_rewards, pass_dict
 
 
-def run_with_retriever(problems, retriever, llm_client, reward_fn, n_samples, desc):
+def run_with_retriever(problems, retriever, llm_client, reward_fn, n_samples, desc, log_dir=None):
     """With retrieval (pretrained or RL-trained). Returns (all_rewards, pass_dict)."""
     all_rewards = []
     pass_dict = {}
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
     for problem in tqdm(problems, desc=desc):
         context = retriever.retrieve(problem)
         prompt = build_prompt(problem, context.snippets[:1])
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes, snippets=context.snippets)
         all_rewards.append(rewards)
-        pass_dict[problem.task_id] = _passed(rewards)
+        passed = _passed(rewards)
+        pass_dict[problem.task_id] = passed
+
+        if log_dir:
+            task_id_safe = problem.task_id.replace("/", "_")
+            fname = os.path.join(log_dir, f"{'PASS' if passed else 'FAIL'}_{task_id_safe}.txt")
+            sim_scores = context.scores.tolist() if hasattr(context.scores, "tolist") else list(context.scores)
+            lines = [f"# [{('PASS' if passed else 'FAIL')}] {problem.task_id}\n\n"]
+            lines.append("## Problem Prompt\n\n```python\n" + problem.prompt + "\n```\n\n")
+            lines.append("## Retrieved Snippets (only Snippet 1 is used in prompt)\n\n")
+            for i, snippet in enumerate(context.snippets):
+                sim = sim_scores[i] if i < len(sim_scores) else float("nan")
+                used = " ← used in prompt" if i == 0 else ""
+                lines.append(f"### Snippet {i+1}{used}  |  Similarity: {sim:.4f}\n\n")
+                lines.append(f"Docstring: {snippet.docstring}\n\n")
+                lines.append(f"```python\n{snippet.code}\n```\n\n")
+            lines.append(f"## Generated Code\n\n```python\n{generated_codes[0] if generated_codes else ''}\n```\n")
+            with open(fname, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+
     return all_rewards, pass_dict
 
 
@@ -192,6 +213,7 @@ def main():
         rewards_pre, pass_pre = run_with_retriever(
             problems, retriever_pre, llm_client, reward_fn, n_samples,
             desc="[2/3] Pretrained CodeBERT",
+            log_dir="outputs/eval_comparison/pretrained",
         )
         results["Pretrained\nCodeBERT"] = {
             "pass@1": compute_pass_at_k(rewards_pre, k=1),
@@ -210,6 +232,7 @@ def main():
             rewards_rl, pass_rl = run_with_retriever(
                 problems, retriever_rl, llm_client, reward_fn, n_samples,
                 desc="[3/3] RL-Trained CodeBERT",
+                log_dir="outputs/eval_comparison/rl_trained",
             )
             results["RL-Trained\nCodeBERT"] = {
                 "pass@1": compute_pass_at_k(rewards_rl, k=1),
