@@ -88,17 +88,19 @@ class SnippetRelevanceJudge:
         self, pairs: List[tuple]
     ) -> List[float]:
         """Score all (problem, snippet) pairs with semaphore-controlled concurrency."""
-        from tqdm import tqdm
+        from tqdm.asyncio import tqdm
         sem = asyncio.Semaphore(self.config.max_concurrency)
 
-        with tqdm(total=len(pairs), desc="Eval-judge", leave=False) as pbar:
-            async def _one(p, s):
-                async with sem:
-                    result = await self.score_async(p, s)
-                pbar.update(1)
-                return result
+        async def _one(p, s):
+            async with sem:
+                return await self.score_async(p, s)
 
-            return list(await asyncio.gather(*[_one(p, s) for p, s in pairs]))
+        return list(await tqdm.gather(
+            *[_one(p, s) for p, s in pairs],
+            desc="Eval-judge",
+            leave=False,
+            total=len(pairs),
+        ))
 
     def score_pairs_batch(
         self, pairs: List[tuple]
