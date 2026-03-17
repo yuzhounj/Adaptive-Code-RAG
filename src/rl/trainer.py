@@ -178,10 +178,23 @@ class RLTrainer:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(eval_problems, desc="Eval-retrieve", leave=False)]
 
+            # Flatten all (problem, snippet) pairs and score in one event loop
+            # to avoid 100 serial asyncio.run() calls.
+            judge = self.reward_fn._get_judge()
+            all_pairs = [(p, s) for p, ctx in zip(eval_problems, contexts) for s in ctx.snippets]
+            flat_scores = judge.score_pairs_batch(all_pairs)
+
+            # Rebuild per-problem score lists
+            idx = 0
+            problem_scores: list = []
+            for p, ctx in zip(eval_problems, contexts):
+                n = len(ctx.snippets)
+                problem_scores.append(flat_scores[idx:idx + n])
+                idx += n
+
             all_rel_scores = []
-            for case_idx, (p, ctx) in enumerate(tqdm(zip(eval_problems, contexts), total=len(eval_problems), desc="Eval-judge", leave=False)):
+            for case_idx, (p, ctx, scores) in enumerate(zip(eval_problems, contexts, problem_scores)):
                 if ctx.snippets:
-                    scores = self.reward_fn.compute_snippet_rewards(p, ctx.snippets)
                     weights = [1.0 / (i + 1) for i in range(len(scores))]
                     total_w = sum(weights)
                     weighted_relevance = sum(w * s for w, s in zip(weights, scores)) / total_w

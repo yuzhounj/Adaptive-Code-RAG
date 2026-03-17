@@ -83,3 +83,28 @@ class SnippetRelevanceJudge:
         if not snippets:
             return []
         return asyncio.run(self.score_batch_async(problem, snippets))
+
+    async def _score_pairs_async(
+        self, pairs: List[tuple]
+    ) -> List[float]:
+        """Score all (problem, snippet) pairs with semaphore-controlled concurrency."""
+        sem = asyncio.Semaphore(self.config.max_concurrency)
+
+        async def _one(p, s):
+            async with sem:
+                return await self.score_async(p, s)
+
+        return list(await asyncio.gather(*[_one(p, s) for p, s in pairs]))
+
+    def score_pairs_batch(
+        self, pairs: List[tuple]
+    ) -> List[float]:
+        """Score a flat list of (problem, snippet) pairs in one event loop.
+
+        More efficient than calling score_batch() per problem because all pairs
+        share a single asyncio event loop and a semaphore limits concurrency to
+        max_concurrency, preventing LLM overload.
+        """
+        if not pairs:
+            return []
+        return asyncio.run(self._score_pairs_async(pairs))
