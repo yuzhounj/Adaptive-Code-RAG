@@ -21,7 +21,7 @@ def compute_pass_at_k(all_rewards: List[List[float]], k: int = 1) -> float:
     scores = []
     for rewards in all_rewards:
         n = len(rewards)
-        c = sum(1 for r in rewards if r >= 0.5)  # threshold for "pass"
+        c = sum(1 for r in rewards if r == 1.0)  # executor returns 1.0 (pass) or 0.0 (fail)
         score = pass_at_k_unbiased(n, c, k)
         scores.append(score)
     return sum(scores) / len(scores) if scores else 0.0

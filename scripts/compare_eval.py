@@ -60,27 +60,36 @@ from src.utils.checkpoint import load_checkpoint
 # Evaluation helpers
 # ---------------------------------------------------------------------------
 
+def _passed(rewards) -> bool:
+    """A problem is considered passed if any generated sample executes correctly (reward == 1.0)."""
+    return any(r == 1.0 for r in rewards)
+
+
 def run_baseline(problems, llm_client, reward_fn, n_samples):
-    """No retrieval — pure LLM."""
+    """No retrieval — pure LLM. Returns (all_rewards, pass_dict)."""
     all_rewards = []
+    pass_dict = {}
     for problem in tqdm(problems, desc="[1/3] Baseline (no retrieval)"):
         prompt = build_prompt(problem, snippets=[])
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes)
         all_rewards.append(rewards)
-    return all_rewards
+        pass_dict[problem.task_id] = _passed(rewards)
+    return all_rewards, pass_dict
 
 
 def run_with_retriever(problems, retriever, llm_client, reward_fn, n_samples, desc):
-    """With retrieval (pretrained or RL-trained)."""
+    """With retrieval (pretrained or RL-trained). Returns (all_rewards, pass_dict)."""
     all_rewards = []
+    pass_dict = {}
     for problem in tqdm(problems, desc=desc):
         context = retriever.retrieve(problem)
         prompt = build_prompt(problem, context.snippets[:1])
         generated_codes = llm_client.generate(prompt, n=n_samples, temperature=0.0)
         rewards = reward_fn.compute(problem, generated_codes, snippets=context.snippets)
         all_rewards.append(rewards)
-    return all_rewards
+        pass_dict[problem.task_id] = _passed(rewards)
+    return all_rewards, pass_dict
 
 
 def build_retriever(config, encoder, device, problems):
@@ -168,7 +177,7 @@ def main():
 
     with torch.no_grad():
         # 1. Baseline — no retrieval
-        rewards_baseline = run_baseline(problems, llm_client, reward_fn, n_samples)
+        rewards_baseline, _ = run_baseline(problems, llm_client, reward_fn, n_samples)
         results["Baseline\n(LLM only)"] = {
             "pass@1": compute_pass_at_k(rewards_baseline, k=1),
         }
@@ -180,7 +189,7 @@ def main():
         ).to(device)
         encoder_pre.eval()
         retriever_pre = build_retriever(config, encoder_pre, device, problems)
-        rewards_pre = run_with_retriever(
+        rewards_pre, pass_pre = run_with_retriever(
             problems, retriever_pre, llm_client, reward_fn, n_samples,
             desc="[2/3] Pretrained CodeBERT",
         )
@@ -189,6 +198,7 @@ def main():
         }
 
         # 3. RL-Trained CodeBERT (optional)
+        pass_rl = None
         if args.checkpoint:
             encoder_rl = CodeBERTEncoder(
                 model_name=config.retriever.model_name,
@@ -197,7 +207,7 @@ def main():
             load_checkpoint(args.checkpoint, encoder_rl)
             encoder_rl.eval()
             retriever_rl = build_retriever(config, encoder_rl, device, problems)
-            rewards_rl = run_with_retriever(
+            rewards_rl, pass_rl = run_with_retriever(
                 problems, retriever_rl, llm_client, reward_fn, n_samples,
                 desc="[3/3] RL-Trained CodeBERT",
             )
@@ -212,6 +222,30 @@ def main():
     for label, metrics in results.items():
         clean_label = label.replace("\n", " ")
         print(f"{clean_label:<25}  {metrics['pass@1']:>8.4f}")
+
+    # --- Regression analysis: pretrained pass but RL fail ---
+    if pass_rl is not None:
+        regressed = sorted(
+            task_id for task_id, passed in pass_pre.items()
+            if passed and not pass_rl.get(task_id, True)
+        )
+        print(f"\n=== Pretrained ✓ → RL-Trained ✗  ({len(regressed)} problems) ===")
+        if regressed:
+            for task_id in regressed:
+                print(f"  {task_id}")
+        else:
+            print("  (none)")
+
+        gained = sorted(
+            task_id for task_id, passed in pass_rl.items()
+            if passed and not pass_pre.get(task_id, True)
+        )
+        print(f"\n=== Pretrained ✗ → RL-Trained ✓  ({len(gained)} problems) ===")
+        if gained:
+            for task_id in gained:
+                print(f"  {task_id}")
+        else:
+            print("  (none)")
 
     # --- Plot ---
     chart_path = "outputs/eval_comparison/comparison.png"

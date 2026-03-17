@@ -29,7 +29,7 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
 ) -> int:
     """Load checkpoint. Returns the saved step number."""
-    state = torch.load(path, map_location="cpu")
+    state = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(state["model_state_dict"])
     if optimizer and "optimizer_state_dict" in state:
         optimizer.load_state_dict(state["optimizer_state_dict"])
