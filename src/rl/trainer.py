@@ -1,7 +1,6 @@
 import os
 import random
 import shutil
-import time
 import torch
 from typing import List, Optional
 from tqdm import tqdm
@@ -51,13 +50,20 @@ class RLTrainer:
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
         """Run one training step on a batch of problems."""
-        t0 = time.perf_counter()
-
         # 1. Retrieve with gradient (fast, serial)
         contexts = [self.retriever.retrieve(problem) for problem in batch]
-        t1 = time.perf_counter()
 
         # 2. Compute per-snippet relevance rewards (no LLM generation — CSN has no test cases)
+        all_snippet_rewards = []
+        for problem, context in zip(batch, contexts):
+            snippet_rewards = self.reward_fn.compute_snippet_rewards(
+                problem, snippets=context.snippets
+            )
+            all_snippet_rewards.append(snippet_rewards)
+
+        flat = [r for rewards in all_snippet_rewards for r in rewards]
+        raw_mean_reward = sum(flat) / len(flat) if flat else 0.0
+
         batch_losses = []
         batch_rewards = []
         batch_advantages = []
@@ -65,10 +71,7 @@ class RLTrainer:
         batch_pg_losses = []
         batch_baselines = []
 
-        for problem, context in zip(batch, contexts):
-            snippet_rewards = self.reward_fn.compute_snippet_rewards(
-                problem, snippets=context.snippets
-            )
+        for context, snippet_rewards in zip(contexts, all_snippet_rewards):
             loss_output = self.policy.compute_loss(
                 log_probs=context.log_probs,
                 snippet_rewards=snippet_rewards,
@@ -79,7 +82,6 @@ class RLTrainer:
             batch_entropies.append(loss_output.entropy)
             batch_pg_losses.append(loss_output.pg_loss)
             batch_baselines.append(loss_output.baseline_val)
-        t2 = time.perf_counter()
 
         # 3. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
@@ -90,7 +92,6 @@ class RLTrainer:
             self.config.rl.max_grad_norm,
         ).item()
         self.optimizer.step()
-        t3 = time.perf_counter()
 
         n = len(batch_rewards)
         mean_reward = sum(batch_rewards) / n
@@ -100,15 +101,12 @@ class RLTrainer:
             "loss": total_loss.item(),
             "pg_loss": sum(batch_pg_losses) / n,
             "entropy": sum(batch_entropies) / n,
-            "mean_reward": mean_reward,
+            "mean_reward": raw_mean_reward,
             "reward_std": reward_std,
             "mean_advantage": sum(batch_advantages) / n,
             "baseline": sum(batch_baselines) / n,
             "grad_norm": grad_norm,
-            "time/retrieve": t1 - t0,
-            "time/reward": t2 - t1,
-            "time/backward": t3 - t2,
-            "time/total": t3 - t0,
+            "snippet_rewards": flat,
         }
 
     def train(
@@ -161,13 +159,14 @@ class RLTrainer:
             })
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
+            if self.global_step % rl_cfg.metrics_log_interval == 0:
                 self._metrics_log.write(
                     f"[step {self.global_step}] "
                     f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} | "
                     f"rew={metrics['mean_reward']:.4f}±{metrics['reward_std']:.4f}  "
                     f"adv={metrics['mean_advantage']:.4f}  base={metrics['baseline']:.4f} | "
                     f"gnorm={metrics['grad_norm']:.4f} | "
-                    f"t_ret={metrics['time/retrieve']:.1f}s  t_rew={metrics['time/reward']:.1f}s\n"
+                    f"snippet_rewards=[{', '.join(f'{r:.3f}' for r in metrics['snippet_rewards'])}]\n"
                 )
                 self._metrics_log.flush()
 

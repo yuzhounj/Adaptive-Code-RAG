@@ -17,20 +17,20 @@ Code Snippet:
 {snippet_code}
 ```
 
-Choose EXACTLY one score from this fixed set: 0.0, 0.3, 0.7, 1.0
+Score the relevance on a continuous scale from 0.0 to 1.0 (one decimal place).
 
-Scoring rules (be strict — when in doubt, score lower):
-- 1.0: The snippet directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
-- 0.7: The snippet demonstrates a clearly relevant technique or pattern (e.g., same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
-- 0.3: The snippet is in the same general domain (e.g., both deal with strings, both use recursion) but the core logic is different. Provides little concrete guidance.
-- 0.0: The snippet is unrelated or uses a completely different approach. Retrieving it wastes context.
+Scoring guidelines (be strict — when in doubt, score lower):
+- 0.9–1.0: Directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
+- 0.6–0.8: Demonstrates a clearly relevant technique or pattern (same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
+- 0.3–0.5: Same general domain (e.g., both deal with strings, both use recursion) but core logic differs. Provides little concrete guidance.
+- 0.0–0.2: Unrelated or uses a completely different approach. Retrieving it wastes context.
 
 Common mistakes to avoid:
-- Do NOT give 0.7 just because both snippets use Python or share basic syntax.
-- Do NOT give 0.7 for superficial keyword overlap (e.g., both mention "list").
-- Only give 1.0 if the algorithm itself matches, not just the topic.
+- Do NOT score above 0.5 just because both use Python or share basic syntax.
+- Do NOT score above 0.5 for superficial keyword overlap (e.g., both mention "list").
+- Only score above 0.8 if the algorithm itself matches, not just the topic.
 
-Respond with ONLY one of: 0.0, 0.3, 0.7, 1.0"""
+Respond with ONLY a single float between 0.0 and 1.0, e.g. 0.7"""
 
 
 class SnippetRelevanceJudge:
@@ -56,9 +56,9 @@ class SnippetRelevanceJudge:
             )
             text = response.choices[0].message.content.strip()
             score = float(text)
-            if score not in (0.0, 0.3, 0.7, 1.0):
-                raise ValueError(f"Unexpected score value: {score!r}")
-            return score
+            if not (0.0 <= score <= 1.0):
+                raise ValueError(f"Score out of range [0, 1]: {score!r}")
+            return round(score, 1)
         except Exception as e:
             raise RuntimeError(f"Relevance judge failed (response: {text!r}): {e}") from e
 

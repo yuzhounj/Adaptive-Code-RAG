@@ -45,6 +45,7 @@ class RLConfig:
     eval_interval: int = 200
     checkpoint_interval: int = 500
     log_interval: int = 10
+    metrics_log_interval: int = 1
     index_refresh_interval: int = 50
 
 

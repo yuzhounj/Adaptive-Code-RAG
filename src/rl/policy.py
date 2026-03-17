@@ -69,17 +69,19 @@ class REINFORCEPolicy:
         """
         mean_reward = sum(snippet_rewards) / len(snippet_rewards) if snippet_rewards else 0.0
 
-        # Compute per-snippet advantages: clip negative advantages to zero.
-        # This prevents all-zero-reward batches from producing destructive
-        # negative gradients while preserving the absolute quality signal.
         baseline_val = self.baseline.get()
         self.baseline.update(mean_reward)
 
-        advantages = torch.tensor(
-            [max(r - baseline_val, 0.0) for r in snippet_rewards],
+        raw_advantages = torch.tensor(
+            [r - baseline_val for r in snippet_rewards],
             dtype=torch.float32,
             device=log_probs.device,
         )
+
+        # Normalize advantage scale for stable learning rate across batches.
+        # Preserves sign so negative advantages suppress bad retrievals.
+        adv_std = raw_advantages.std() + 1e-8
+        advantages = raw_advantages / adv_std
 
         # Per-snippet policy gradient loss
         pg_loss = -(log_probs * advantages).sum()
