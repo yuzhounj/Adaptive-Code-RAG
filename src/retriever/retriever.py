@@ -42,10 +42,16 @@ class DifferentiableRetriever:
         texts = [f"{s.docstring} {s.code}"[:512] for s in snippets]
         enc = self.doc_encoder if self.doc_encoder is not None else self.encoder
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            embs = enc.encode_corpus_batch(batch, device=device)
-            all_embeddings.append(embs)
+        was_training = enc.training
+        enc.eval()
+        try:
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                embs = enc.encode_corpus_batch(batch, device=device)
+                all_embeddings.append(embs)
+        finally:
+            if was_training:
+                enc.train()
 
         corpus_embeddings = np.concatenate(all_embeddings, axis=0).astype(np.float32)
         self.faiss_index.build(corpus_embeddings)
