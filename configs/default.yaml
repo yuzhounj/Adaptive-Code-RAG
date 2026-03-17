@@ -6,7 +6,7 @@ retriever:
   freeze_doc_encoder: false
 
 generator:
-  model: "ollama/qwen2.5:1.5b"
+  model: "ollama/qwen2.5-coder:7b"
   api_base: "http://localhost:11434"
   n_samples: 1
   temperature: 0.8
@@ -40,7 +40,7 @@ data:
   humaneval_dir: "data/humaneval"
   codesearchnet_max_samples: 5000
   csn_eval_size: 100
-  humaneval_eval_size: 50
+  humaneval_eval_size: 200
 
 logging:
   use_wandb: false
