@@ -119,6 +119,8 @@ class RLTrainer:
     ) -> None:
         """Main training loop."""
         os.makedirs("outputs", exist_ok=True)
+        log_mode = "w" if self.global_step == 0 else "a"
+        self._metrics_log = open("outputs/metrics.log", log_mode)
         fail_dir = "outputs/fail_cases"
         if os.path.exists(fail_dir):
             shutil.rmtree(fail_dir)
@@ -159,14 +161,15 @@ class RLTrainer:
             })
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
-                print(
-                    f"\n[step {self.global_step}] "
+                self._metrics_log.write(
+                    f"[step {self.global_step}] "
                     f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} | "
                     f"rew={metrics['mean_reward']:.4f}±{metrics['reward_std']:.4f}  "
                     f"adv={metrics['mean_advantage']:.4f}  base={metrics['baseline']:.4f} | "
                     f"gnorm={metrics['grad_norm']:.4f} | "
-                    f"t_ret={metrics['time/retrieve']:.1f}s  t_rew={metrics['time/reward']:.1f}s"
+                    f"t_ret={metrics['time/retrieve']:.1f}s  t_rew={metrics['time/reward']:.1f}s\n"
                 )
+                self._metrics_log.flush()
 
             # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:
@@ -185,6 +188,7 @@ class RLTrainer:
 
         pbar.close()
         self.logger.close()
+        self._metrics_log.close()
 
     def evaluate(self, eval_problems: List[HumanEvalProblem]) -> dict:
         """Evaluate retrieval quality on held-out CSN problems using the current CSN index.
