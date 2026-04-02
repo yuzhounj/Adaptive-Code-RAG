@@ -2,8 +2,8 @@
 """RL training entry point."""
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
-os.environ["HF_HUB_OFFLINE"] = "1"
+# os.environ["HF_DATASETS_OFFLINE"] = "1"
+# os.environ["HF_HUB_OFFLINE"] = "1"
 import sys
 import argparse
 import torch

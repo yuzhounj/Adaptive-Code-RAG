@@ -14,6 +14,7 @@ from src.reward.reward_fn import RewardFunction
 from src.rl.policy import REINFORCEPolicy
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logging_utils import TrainingLogger
+from transformers import get_linear_schedule_with_warmup
 
 
 class RLTrainer:
@@ -43,6 +44,12 @@ class RLTrainer:
         self.optimizer = torch.optim.AdamW(
             encoder.model.parameters(),
             lr=config.rl.learning_rate,
+        )
+
+        self.scheduler = get_linear_schedule_with_warmup(
+            self.optimizer,
+            num_warmup_steps=config.rl.warmup_steps,
+            num_training_steps=config.rl.max_steps
         )
 
         self.logger = TrainingLogger(config)
@@ -92,6 +99,8 @@ class RLTrainer:
             self.config.rl.max_grad_norm,
         ).item()
         self.optimizer.step()
+
+        self.scheduler.step()
 
         n = len(batch_rewards)
         mean_reward = sum(batch_rewards) / n

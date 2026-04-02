@@ -59,7 +59,7 @@ def main():
 
     batch_size = 64
     all_embeddings = []
-    texts = [f"{s.docstring} {s.code}"[:512] for s in snippets]
+    texts = [f"{s.docstring}\n{s.code}" for s in snippets]
 
     for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
         batch = texts[i:i + batch_size]
