@@ -11,14 +11,13 @@ from src.retriever.retriever import DifferentiableRetriever
 from src.retriever.encoder import CodeBERTEncoder
 from src.generator.llm_client import LLMClient
 from src.reward.reward_fn import RewardFunction
-from src.rl.policy import REINFORCEPolicy
+from src.rl.policy import GRPOPolicy # 修改点 1
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logging_utils import TrainingLogger
 from transformers import get_linear_schedule_with_warmup
 
-
 class RLTrainer:
-    """Full closed-loop RL training loop for CodeBERT retriever."""
+    """Full closed-loop RL training loop using GRPO."""
 
     def __init__(
         self,
@@ -36,8 +35,8 @@ class RLTrainer:
         self.reward_fn = reward_fn
         self.device = device
 
-        self.policy = REINFORCEPolicy(
-            baseline_decay=config.rl.baseline_decay,
+        # 修改点 2: 使用 GRPOPolicy
+        self.policy = GRPOPolicy(
             entropy_coeff=config.rl.entropy_coeff,
         )
 
@@ -56,11 +55,8 @@ class RLTrainer:
         self.global_step = 0
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
-        """Run one training step on a batch of problems."""
-        # 1. Retrieve with gradient (fast, serial)
         contexts = [self.retriever.retrieve(problem) for problem in batch]
 
-        # 2. Compute per-snippet relevance rewards (no LLM generation — CSN has no test cases)
         all_snippet_rewards = []
         for problem, context in zip(batch, contexts):
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
@@ -76,7 +72,6 @@ class RLTrainer:
         batch_advantages = []
         batch_entropies = []
         batch_pg_losses = []
-        batch_baselines = []
 
         for context, snippet_rewards in zip(contexts, all_snippet_rewards):
             loss_output = self.policy.compute_loss(
@@ -88,9 +83,7 @@ class RLTrainer:
             batch_advantages.append(loss_output.advantage)
             batch_entropies.append(loss_output.entropy)
             batch_pg_losses.append(loss_output.pg_loss)
-            batch_baselines.append(loss_output.baseline_val)
 
-        # 3. Aggregate and backprop
         total_loss = torch.stack(batch_losses).mean()
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -99,7 +92,6 @@ class RLTrainer:
             self.config.rl.max_grad_norm,
         ).item()
         self.optimizer.step()
-
         self.scheduler.step()
 
         n = len(batch_rewards)
@@ -112,8 +104,7 @@ class RLTrainer:
             "entropy": sum(batch_entropies) / n,
             "mean_reward": raw_mean_reward,
             "reward_std": reward_std,
-            "mean_advantage": sum(batch_advantages) / n,
-            "baseline": sum(batch_baselines) / n,
+            "mean_advantage": sum(batch_advantages) / n, # 应该极小
             "grad_norm": grad_norm,
             "snippet_rewards": flat,
         }
@@ -124,7 +115,6 @@ class RLTrainer:
         eval_problems: Optional[List[HumanEvalProblem]] = None,
         resume_from: Optional[str] = None,
     ) -> None:
-        """Main training loop."""
         os.makedirs("outputs", exist_ok=True)
         log_mode = "w" if self.global_step == 0 else "a"
         self._metrics_log = open("outputs/metrics.log", log_mode)
@@ -140,28 +130,20 @@ class RLTrainer:
             print(f"Resumed from step {self.global_step}")
 
         rl_cfg = self.config.rl
-
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
-
-        # Always rebuild index on startup to ensure corpus embeddings match current encoder
         self.retriever.refresh_index(step=self.global_step)
 
-        # Initial evaluation at step 0 (baseline before training)
         if eval_problems and self.global_step == 0:
             eval_metrics = self.evaluate(eval_problems)
             self.logger.log(eval_metrics, step=0, prefix="eval")
             print(f"\nStep 0 eval (baseline): {eval_metrics}")
 
         while self.global_step < rl_cfg.max_steps:
-            # Sample batch
             batch = random.sample(train_problems, min(rl_cfg.batch_size, len(train_problems)))
-
-            # Train step
             metrics = self.train_step(batch)
             self.global_step += 1
             pbar.update(1)
 
-            # Logging
             pbar.set_postfix({
                 "loss": f"{metrics['loss']:.4f}",
                 "rew": f"{metrics['mean_reward']:.3f}",
@@ -169,27 +151,25 @@ class RLTrainer:
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
             if self.global_step % rl_cfg.metrics_log_interval == 0:
+                # 修改点 3: 移除 baseline 的日志记录
                 self._metrics_log.write(
                     f"[step {self.global_step}] "
                     f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} | "
                     f"rew={metrics['mean_reward']:.4f}±{metrics['reward_std']:.4f}  "
-                    f"adv={metrics['mean_advantage']:.4f}  base={metrics['baseline']:.4f} | "
+                    f"adv={metrics['mean_advantage']:.4f} | "
                     f"gnorm={metrics['grad_norm']:.4f} | "
                     f"snippet_rewards=[{', '.join(f'{r:.3f}' for r in metrics['snippet_rewards'])}]\n"
                 )
                 self._metrics_log.flush()
 
-            # Evaluation
             if eval_problems and self.global_step % rl_cfg.eval_interval == 0:
                 eval_metrics = self.evaluate(eval_problems)
                 self.logger.log(eval_metrics, step=self.global_step, prefix="eval")
                 print(f"\nStep {self.global_step} eval: {eval_metrics}")
 
-            # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:
                 self.retriever.refresh_index(step=self.global_step)
 
-            # Checkpoint
             if self.global_step % rl_cfg.checkpoint_interval == 0:
                 ckpt_path = f"{self.config.output.checkpoint_dir}/step_{self.global_step}.pt"
                 save_checkpoint(ckpt_path, self.encoder, self.optimizer, self.global_step)
@@ -199,10 +179,6 @@ class RLTrainer:
         self._metrics_log.close()
 
     def evaluate(self, eval_problems: List[HumanEvalProblem]) -> dict:
-        """Evaluate retrieval quality on held-out CSN problems using the current CSN index.
-
-        No index swap, no code generation. Metrics: avg_snippet_relevance (position-weighted).
-        """
         eval_logs_root = os.path.join("outputs", "eval_logs")
         if self.global_step == 0 and os.path.exists(eval_logs_root):
             shutil.rmtree(eval_logs_root)
@@ -214,13 +190,10 @@ class RLTrainer:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(eval_problems, desc="Eval-retrieve", leave=False)]
 
-            # Flatten all (problem, snippet) pairs and score in one event loop
-            # to avoid 100 serial asyncio.run() calls.
             judge = self.reward_fn._get_judge()
             all_pairs = [(p, s) for p, ctx in zip(eval_problems, contexts) for s in ctx.snippets]
             flat_scores = judge.score_pairs_batch(all_pairs)
 
-            # Rebuild per-problem score lists
             idx = 0
             problem_scores: list = []
             for p, ctx in zip(eval_problems, contexts):

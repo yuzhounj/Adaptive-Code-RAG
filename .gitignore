@@ -10,3 +10,6 @@ build/
 wandb/
 *.log
 .idea/
+Modelfile_7b
+Modelfile_14b
+step_3000.pt

@@ -12,11 +12,9 @@ from src.config import RetrieverConfig
 
 class DifferentiableRetriever:
     """
-    Retriever with gradient flow for REINFORCE training.
-
-    FAISS retrieves top-k candidates (no_grad, periodic rebuild).
-    Then re-scores them differentiably: query_emb @ corpus_embs_k.T
-    log_prob = log_softmax(scores).sum() — gradient flows to query encoder.
+    Retriever with gradient flow for RL training.
+    Upgraded for GRPO: FAISS retrieves a larger pool, and we sample G items
+    based on their similarity probabilities to enable exploration.
     """
 
     def __init__(self, config: RetrieverConfig, encoder: CodeBERTEncoder):
@@ -34,7 +32,6 @@ class DifferentiableRetriever:
             self.doc_encoder = None
 
     def build_index(self, snippets: List[CodeSnippet], batch_size: int = 64) -> None:
-        """Encode corpus and build FAISS index. No gradient."""
         self.corpus_snippets = snippets
         device = next(self.encoder.model.parameters()).device
 
@@ -57,54 +54,65 @@ class DifferentiableRetriever:
         self.faiss_index.build(corpus_embeddings)
 
     def refresh_index(self, step: int = 0) -> None:
-        """Rebuild FAISS index with updated encoder weights. Called periodically."""
         if self.config.freeze_doc_encoder:
-            return  # corpus embedding 固定，无需重建
+            return
         if self.corpus_snippets:
             print(f"Refreshing FAISS index at step {step}...")
             self.build_index(self.corpus_snippets)
 
     def retrieve(
-        self,
-        problem: HumanEvalProblem,
-        top_k: Optional[int] = None,
+            self,
+            problem: HumanEvalProblem,
+            top_k: Optional[int] = None,
     ) -> RetrievedContext:
-        """
-        Retrieve top-k snippets for a problem.
-        Returns RetrievedContext with gradient-attached log_probs.
-        """
+
         k = top_k or self.config.top_k
         device = next(self.encoder.model.parameters()).device
+
+        # GRPO: 查出一个更大的候选池，以便从中采样 (4倍 k，保底32)
+        pool_size = max(k * 4, 32)
 
         # Encode query WITH gradient
         query_emb = self.encoder.encode_query(problem.prompt, device=device)  # [768]
 
         # FAISS search (no grad)
         query_np = query_emb.detach().cpu().numpy()
-        _, indices = self.faiss_index.search(query_np, k)
+        _, pool_indices = self.faiss_index.search(query_np, pool_size)
 
-        # Filter invalid indices
-        valid_mask = indices >= 0
-        indices = indices[valid_mask]
+        valid_mask = pool_indices >= 0
+        pool_indices = pool_indices[valid_mask]
 
-        if len(indices) == 0:
-            # Fallback: return empty context with zero log_prob
+        if len(pool_indices) == 0:
             dummy_log_prob = torch.zeros(1, device=device, requires_grad=True)
-            return RetrievedContext(
-                problem=problem,
-                snippets=[],
-                log_probs=dummy_log_prob,
-                scores=dummy_log_prob,
-            )
+            return RetrievedContext(problem=problem, snippets=[], log_probs=dummy_log_prob, scores=dummy_log_prob)
 
-        # Re-score differentiably: gradient flows through query_emb
-        corpus_embs_k = self.faiss_index.get_embeddings_by_indices(indices).to(device)  # [k, 768]
-        scores_k = query_emb @ corpus_embs_k.T  # [k], gradient flows here
+        # 计算候选池中所有片段的相似度分数 (Gradient flows here)
+        corpus_embs_pool = self.faiss_index.get_embeddings_by_indices(pool_indices).to(device)
+        scores_pool = query_emb @ corpus_embs_pool.T  # [pool_size]
 
-        log_probs_k = F.log_softmax(scores_k, dim=0)  # [k]
+        # 在池子内部计算对数概率
+        log_probs_pool = F.log_softmax(scores_pool, dim=0)
 
-        # Get corresponding snippets
-        snippets = [self.corpus_snippets[idx] for idx in indices]
+        # === GRPO 核心探索机制 ===
+        num_to_take = min(k, len(pool_indices))
+
+        if self.encoder.training:
+            # 训练时：按照概率分布进行无放回采样，赋予模型探索不同 snippet 的机会
+            probs_pool = torch.exp(log_probs_pool)
+            if torch.isnan(probs_pool).any() or probs_pool.sum() == 0:
+                probs_pool = torch.ones_like(probs_pool) / len(probs_pool)
+
+            sampled_local_indices = torch.multinomial(probs_pool, num_samples=num_to_take, replacement=False)
+        else:
+            # 评估时：确定性取最高分的 Top-K
+            _, sampled_local_indices = torch.topk(scores_pool, num_to_take)
+
+        # 提取被选中的片段的对数概率、分数和原索引
+        log_probs_k = log_probs_pool[sampled_local_indices]
+        scores_k = scores_pool[sampled_local_indices]
+        final_indices = pool_indices[sampled_local_indices.cpu().numpy()]
+
+        snippets = [self.corpus_snippets[idx] for idx in final_indices]
 
         return RetrievedContext(
             problem=problem,
@@ -112,4 +120,3 @@ class DifferentiableRetriever:
             log_probs=log_probs_k,
             scores=scores_k,
         )
-

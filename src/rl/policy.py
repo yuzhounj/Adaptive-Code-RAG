@@ -1,30 +1,6 @@
 import torch
-import torch.nn.functional as F
-from typing import List, Optional
+from typing import List
 from dataclasses import dataclass
-
-
-class RunningMeanBaseline:
-    """Exponential moving average baseline to reduce REINFORCE variance."""
-
-    def __init__(self, decay: float = 0.99):
-        self.decay = decay
-        self._value: float = 0.0
-        self._initialized: bool = False
-
-    def update(self, reward: float) -> None:
-        if not self._initialized:
-            self._value = reward
-            self._initialized = True
-        else:
-            self._value = self.decay * self._value + (1 - self.decay) * reward
-
-    def get(self) -> float:
-        return self._value
-
-    def reset(self) -> None:
-        self._value = 0.0
-        self._initialized = False
 
 
 @dataclass
@@ -34,70 +10,54 @@ class PolicyLossOutput:
     entropy: float
     raw_reward: float
     pg_loss: float
-    baseline_val: float
 
 
-class REINFORCEPolicy:
+class GRPOPolicy:
     """
-    REINFORCE policy gradient for retriever training.
-
-    Loss = -log_prob * advantage - entropy_coeff * entropy
-    where advantage = reward - baseline
+    Group Relative Policy Optimization (GRPO) policy.
+    No baseline tracking needed. Normalizes rewards within the retrieved group.
     """
 
-    def __init__(self, baseline_decay: float = 0.99, entropy_coeff: float = 0.01):
-        self.baseline = RunningMeanBaseline(decay=baseline_decay)
+    def __init__(self, entropy_coeff: float = 0.01):
         self.entropy_coeff = entropy_coeff
 
     def compute_loss(
-        self,
-        log_probs: torch.Tensor,       # [k] log probs of retrieved snippets
-        snippet_rewards: List[float],  # [k] per-snippet relevance rewards
+            self,
+            log_probs: torch.Tensor,  # [G] sampled log probs
+            snippet_rewards: List[float],  # [G] raw rewards for the sampled snippets
     ) -> PolicyLossOutput:
-        """
-        Compute per-snippet REINFORCE loss.
 
-        Each snippet gets its own advantage = snippet_reward - baseline.
-        Loss = -sum_i(log_probs[i] * advantages[i]) - entropy_coeff * entropy
+        device = log_probs.device
+        rewards_tensor = torch.tensor(snippet_rewards, dtype=torch.float32, device=device)
 
-        Args:
-            log_probs: gradient-attached log probs from retriever [k]
-            snippet_rewards: per-snippet LLM relevance scores [k]
+        mean_reward = rewards_tensor.mean()
 
-        Returns:
-            PolicyLossOutput with loss tensor, mean advantage, and entropy
-        """
-        mean_reward = sum(snippet_rewards) / len(snippet_rewards) if snippet_rewards else 0.0
+        # === GRPO 组内归一化 ===
+        if len(snippet_rewards) > 1:
+            std_reward = rewards_tensor.std()
+            # std 加上极小值防止除以 0；如果所有奖励完全一样(std < 1e-4)，优势设为0
+            if std_reward > 1e-4:
+                advantages = (rewards_tensor - mean_reward) / (std_reward + 1e-8)
+            else:
+                advantages = torch.zeros_like(rewards_tensor)
+        else:
+            advantages = torch.zeros_like(rewards_tensor)
 
-        baseline_val = self.baseline.get()
-        self.baseline.update(mean_reward)
+        # 策略梯度损失： L = - mean(log_prob * advantage)
+        # 注意用 detach 截断 advantage 的梯度（以防万一）
+        pg_loss = -(log_probs * advantages.detach()).mean()
 
-        raw_advantages = torch.tensor(
-            [r - baseline_val for r in snippet_rewards],
-            dtype=torch.float32,
-            device=log_probs.device,
-        )
-
-        # Normalize advantage scale for stable learning rate across batches.
-        # Skip normalization when all rewards are equal (std ≈ 0) to avoid
-        # dividing by near-zero and exploding the loss.
-        adv_std = raw_advantages.std()
-        advantages = raw_advantages / (adv_std + 1e-8) if adv_std > 1e-4 else raw_advantages
-
-        # Per-snippet policy gradient loss
-        pg_loss = -(log_probs * advantages).sum()
-
-        # Entropy bonus to prevent retrieval collapse
+        # 熵正则化 bonus，鼓励分布的多样性
         probs = log_probs.exp()
         entropy = -(probs * log_probs).sum()
 
+        # 最终损失
         loss = pg_loss - self.entropy_coeff * entropy
 
         return PolicyLossOutput(
             loss=loss,
-            advantage=advantages.mean().item(),
+            advantage=advantages.mean().item(),  # 归一化后理论上接近 0
             entropy=entropy.item(),
-            raw_reward=mean_reward,
-            pg_loss=pg_loss.item(),
-            baseline_val=baseline_val,
+            raw_reward=mean_reward.item(),
+            pg_loss=pg_loss.item()
         )
