@@ -30,7 +30,7 @@ Common mistakes to avoid:
 - Do NOT score above 0.5 for superficial keyword overlap (e.g., both mention "list").
 - Only score above 0.8 if the algorithm itself matches, not just the topic.
 
-Respond with ONLY a single float between 0.0 and 1.0, e.g. 0.7"""
+Respond with ONLY a single float between 0.00 and 1.00 (use two decimal places to show fine-grained distinction), e.g. 0.73."""
 
 
 class SnippetRelevanceJudge:
