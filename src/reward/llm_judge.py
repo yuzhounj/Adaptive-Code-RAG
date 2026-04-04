@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from typing import List
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 import litellm
@@ -17,20 +18,21 @@ Code Snippet:
 {snippet_code}
 ```
 
-Score the relevance on a continuous scale from 0.0 to 1.0 (one decimal place).
+Score the relevance on a continuous scale from 0.00 to 1.00 (use two decimal places).
 
 Scoring guidelines (be strict — when in doubt, score lower):
-- 0.9–1.0: Directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
-- 0.6–0.8: Demonstrates a clearly relevant technique or pattern (same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
-- 0.3–0.5: Same general domain (e.g., both deal with strings, both use recursion) but core logic differs. Provides little concrete guidance.
-- 0.0–0.2: Unrelated or uses a completely different approach. Retrieving it wastes context.
+0.90-1.00: Directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
+0.60-0.89: Demonstrates a clearly relevant technique or pattern (same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
+0.30-0.59: Same general domain (e.g., both deal with strings, both use recursion) but core logic differs. Provides little concrete guidance.
+0.00-0.29: Unrelated or uses a completely different approach. Retrieving it wastes context.
 
 Common mistakes to avoid:
-- Do NOT score above 0.5 just because both use Python or share basic syntax.
-- Do NOT score above 0.5 for superficial keyword overlap (e.g., both mention "list").
-- Only score above 0.8 if the algorithm itself matches, not just the topic.
+Do NOT score above 0.50 just because both use Python or share basic syntax.
+Do NOT score above 0.50 for superficial keyword overlap (e.g., both mention "list").
 
-Respond with ONLY a single float between 0.00 and 1.00 (use two decimal places to show fine-grained distinction), e.g. 0.73."""
+You MUST format your response exactly as follows:
+REASONING: <Write 1-2 sentences explaining the algorithmic overlap or lack thereof>
+SCORE: <A single float between 0.00 and 1.00>"""
 
 
 class SnippetRelevanceJudge:
@@ -52,15 +54,23 @@ class SnippetRelevanceJudge:
                 api_base=self.config.relevance_api_base,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=10,
+                max_tokens=150,  # 调大 token 数以容纳 reasoning
             )
             text = response.choices[0].message.content.strip()
-            score = float(text)
+
+            # 使用正则安全提取 SCORE
+            match = re.search(r"SCORE:\s*([0-9]*\.?[0-9]+)", text)
+            if match:
+                score = float(match.group(1))
+            else:
+                raise ValueError("Could not parse SCORE from response.")
+
             if not (0.0 <= score <= 1.0):
                 raise ValueError(f"Score out of range [0, 1]: {score!r}")
-            return round(score, 1)
+            return round(score, 2)
         except Exception as e:
-            raise RuntimeError(f"Relevance judge failed (response: {text!r}): {e}") from e
+            print(f"[Judge Warning] Fallback to 0.0 due to error: {e} | Text: {text[:50]}")
+            return 0.0  # 发生解析或 API 错误时给予最低分兜底
 
     async def score_batch_async(
         self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
