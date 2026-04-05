@@ -3,7 +3,7 @@ retriever:
   top_k: 3
   max_seq_len: 512
   embedding_dim: 768
-  freeze_doc_encoder: false
+  freeze_doc_encoder: true  # 冻结文档编码器，防止特征空间坍塌，只训练 Query 端
 
 generator:
   model: "ollama/qwen2.5-coder:7b"
@@ -22,11 +22,11 @@ reward:
 
 rl:
   learning_rate: 5.0e-6
-  batch_size: 2
+  batch_size: 1
   max_steps: 3000
   baseline_decay: 0.99
   entropy_coeff: 0.005
-  max_grad_norm: 0.5
+  max_grad_norm: 0.2  # 降低梯度裁剪阈值，防止高基线反噬时跨步过大撕裂权重
   warmup_steps: 150
   eval_interval: 200
   checkpoint_interval: 500
