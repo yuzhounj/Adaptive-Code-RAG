@@ -3,7 +3,7 @@ retriever:
   top_k: 3
   max_seq_len: 512
   embedding_dim: 768
-  freeze_doc_encoder: true  # 冻结文档编码器，防止特征空间坍塌，只训练 Query 端
+  freeze_doc_encoder: false
 
 generator:
   model: "ollama/qwen2.5-coder:7b"

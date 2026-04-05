@@ -31,7 +31,7 @@ Do NOT score above 0.50 just because both use Python or share basic syntax.
 Do NOT score above 0.50 for superficial keyword overlap (e.g., both mention "list").
 
 You MUST format your response exactly as follows:
-REASONING: <Write 1-2 sentences explaining the algorithmic overlap or lack thereof>
+REASONING: <Write 3-5 keywords ONLY (e.g., "graph DFS, exact match"). NO SENTENCES.>
 SCORE: <A single float between 0.00 and 1.00>"""
 
 
