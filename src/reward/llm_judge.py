@@ -17,20 +17,19 @@ Code Snippet:
 {snippet_code}
 ```
 
-Score the relevance on a continuous scale from 0.0 to 1.0 (one decimal place).
+Score the relevance on a continuous scale from 0.00 to 1.00 (two decimal places).
 
 Scoring guidelines (be strict — when in doubt, score lower):
-- 0.9–1.0: Directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
-- 0.6–0.8: Demonstrates a clearly relevant technique or pattern (same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
-- 0.3–0.5: Same general domain (e.g., both deal with strings, both use recursion) but core logic differs. Provides little concrete guidance.
-- 0.0–0.2: Unrelated or uses a completely different approach. Retrieving it wastes context.
+0.90-1.00: Directly implements the required algorithm or data structure. A programmer could adapt it with minimal changes.
+0.60-0.89: Demonstrates a clearly relevant technique or pattern (same algorithmic idea, same data structure used similarly). Useful but not directly applicable.
+0.30-0.59: Same general domain (e.g., both deal with strings, both use recursion) but core logic differs. Provides little concrete guidance.
+0.00-0.29: Unrelated or uses a completely different approach. Retrieving it wastes context.
 
 Common mistakes to avoid:
-- Do NOT score above 0.5 just because both use Python or share basic syntax.
-- Do NOT score above 0.5 for superficial keyword overlap (e.g., both mention "list").
-- Only score above 0.8 if the algorithm itself matches, not just the topic.
+Do NOT score above 0.50 just because both use Python or share basic syntax.
+Do NOT score above 0.50 for superficial keyword overlap (e.g., both mention "list").
 
-Respond with ONLY a single float between 0.0 and 1.0, e.g. 0.7"""
+Respond with ONLY a single float between 0.00 and 1.00. No reasoning, no tags, no extra text. Example: 0.75"""
 
 
 class SnippetRelevanceJudge:

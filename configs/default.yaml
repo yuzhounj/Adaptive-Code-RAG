@@ -29,10 +29,10 @@ rl:
   max_grad_norm: 0.5
   warmup_steps: 150
   eval_interval: 200
-  checkpoint_interval: 500
+  checkpoint_interval: 1000
   log_interval: 100
   metrics_log_interval: 1
-  index_refresh_interval: 500
+  index_refresh_interval: 200
 
 data:
   cache_dir: "data/cache"
