@@ -4,29 +4,6 @@ from typing import List, Optional
 from dataclasses import dataclass
 
 
-class RunningMeanBaseline:
-    """Exponential moving average baseline to reduce REINFORCE variance."""
-
-    def __init__(self, decay: float = 0.99):
-        self.decay = decay
-        self._value: float = 0.0
-        self._initialized: bool = False
-
-    def update(self, reward: float) -> None:
-        if not self._initialized:
-            self._value = reward
-            self._initialized = True
-        else:
-            self._value = self.decay * self._value + (1 - self.decay) * reward
-
-    def get(self) -> float:
-        return self._value
-
-    def reset(self) -> None:
-        self._value = 0.0
-        self._initialized = False
-
-
 @dataclass
 class PolicyLossOutput:
     loss: torch.Tensor
@@ -41,36 +18,25 @@ class REINFORCEPolicy:
     """
     REINFORCE policy gradient for retriever training.
 
+    Uses a Query-level local baseline.
+    Advantage = snippet_reward - mean(all_snippet_rewards_for_this_query)
     Loss = -log_prob * advantage - entropy_coeff * entropy
-    where advantage = reward - baseline
     """
 
-    def __init__(self, baseline_decay: float = 0.99, entropy_coeff: float = 0.01):
-        self.baseline = RunningMeanBaseline(decay=baseline_decay)
+    def __init__(self, entropy_coeff: float = 0.01):
         self.entropy_coeff = entropy_coeff
 
     def compute_loss(
-        self,
-        log_probs: torch.Tensor,       # [k] log probs of retrieved snippets
-        snippet_rewards: List[float],  # [k] per-snippet relevance rewards
+            self,
+            log_probs: torch.Tensor,  # [k] log probs of retrieved snippets
+            snippet_rewards: List[float],  # [k] per-snippet relevance rewards
     ) -> PolicyLossOutput:
         """
-        Compute per-snippet REINFORCE loss.
-
-        Each snippet gets its own advantage = snippet_reward - baseline.
-        Loss = -sum_i(log_probs[i] * advantages[i]) - entropy_coeff * entropy
-
-        Args:
-            log_probs: gradient-attached log probs from retriever [k]
-            snippet_rewards: per-snippet LLM relevance scores [k]
-
-        Returns:
-            PolicyLossOutput with loss tensor, mean advantage, and entropy
+        Compute per-snippet REINFORCE loss with Query-level baseline.
         """
+        # 计算当前 Query 检索出的 K 个 Snippet 的平均分，作为局部 Baseline
         mean_reward = sum(snippet_rewards) / len(snippet_rewards) if snippet_rewards else 0.0
-
-        baseline_val = self.baseline.get()
-        self.baseline.update(mean_reward)
+        baseline_val = mean_reward
 
         raw_advantages = torch.tensor(
             [r - baseline_val for r in snippet_rewards],

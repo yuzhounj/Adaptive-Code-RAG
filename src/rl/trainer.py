@@ -36,8 +36,8 @@ class RLTrainer:
         self.reward_fn = reward_fn
         self.device = device
 
+        # [优化改动点] 移除了 baseline_decay 参数
         self.policy = REINFORCEPolicy(
-            baseline_decay=config.rl.baseline_decay,
             entropy_coeff=config.rl.entropy_coeff,
         )
 
@@ -60,7 +60,7 @@ class RLTrainer:
         # 1. Retrieve with gradient (fast, serial)
         contexts = [self.retriever.retrieve(problem) for problem in batch]
 
-        # 2. Compute per-snippet relevance rewards (no LLM generation — CSN has no test cases)
+        # 2. Compute per-snippet relevance rewards
         all_snippet_rewards = []
         for problem, context in zip(batch, contexts):
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
@@ -199,10 +199,7 @@ class RLTrainer:
         self._metrics_log.close()
 
     def evaluate(self, eval_problems: List[HumanEvalProblem]) -> dict:
-        """Evaluate retrieval quality on held-out CSN problems using the current CSN index.
-
-        No index swap, no code generation. Metrics: avg_snippet_relevance (position-weighted).
-        """
+        """Evaluate retrieval quality on held-out CSN problems using the current CSN index."""
         eval_logs_root = os.path.join("outputs", "eval_logs")
         if self.global_step == 0 and os.path.exists(eval_logs_root):
             shutil.rmtree(eval_logs_root)
@@ -214,13 +211,10 @@ class RLTrainer:
             with torch.no_grad():
                 contexts = [self.retriever.retrieve(p) for p in tqdm(eval_problems, desc="Eval-retrieve", leave=False)]
 
-            # Flatten all (problem, snippet) pairs and score in one event loop
-            # to avoid 100 serial asyncio.run() calls.
             judge = self.reward_fn._get_judge()
             all_pairs = [(p, s) for p, ctx in zip(eval_problems, contexts) for s in ctx.snippets]
             flat_scores = judge.score_pairs_batch(all_pairs)
 
-            # Rebuild per-problem score lists
             idx = 0
             problem_scores: list = []
             for p, ctx in zip(eval_problems, contexts):
