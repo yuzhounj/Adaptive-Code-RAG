@@ -11,23 +11,23 @@ from src.retriever.retriever import DifferentiableRetriever
 from src.retriever.encoder import CodeBERTEncoder
 from src.generator.llm_client import LLMClient
 from src.reward.reward_fn import RewardFunction
-from src.rl.policy import REINFORCEPolicy
+from src.rl.policy import PPOPolicy
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logging_utils import TrainingLogger
 from transformers import get_linear_schedule_with_warmup
 
 
 class RLTrainer:
-    """Full closed-loop RL training loop for CodeBERT retriever."""
+    """Full closed-loop RL training loop upgraded with PPO."""
 
     def __init__(
-        self,
-        config: TrainingConfig,
-        retriever: DifferentiableRetriever,
-        encoder: CodeBERTEncoder,
-        llm_client: LLMClient,
-        reward_fn: RewardFunction,
-        device: torch.device,
+            self,
+            config: TrainingConfig,
+            retriever: DifferentiableRetriever,
+            encoder: CodeBERTEncoder,
+            llm_client: LLMClient,
+            reward_fn: RewardFunction,
+            device: torch.device,
     ):
         self.config = config
         self.retriever = retriever
@@ -36,9 +36,11 @@ class RLTrainer:
         self.reward_fn = reward_fn
         self.device = device
 
-        # [优化改动点] 移除了 baseline_decay 参数
-        self.policy = REINFORCEPolicy(
-            entropy_coeff=config.rl.entropy_coeff,
+        # Initialize PPO Policy
+        self.policy = PPOPolicy(
+            initial_entropy_coeff=config.rl.entropy_coeff,
+            min_entropy_coeff=0.001,  # Floor entropy
+            clip_eps=0.2  # Standard PPO clip
         )
 
         self.optimizer = torch.optim.AdamW(
@@ -54,75 +56,98 @@ class RLTrainer:
 
         self.logger = TrainingLogger(config)
         self.global_step = 0
+        self.ppo_epochs = 3  # Multiple optimization passes over the same batch
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
-        """Run one training step on a batch of problems."""
-        # 1. Retrieve with gradient (fast, serial)
-        contexts = [self.retriever.retrieve(problem) for problem in batch]
+        """Run one PPO training step consisting of Rollout and Optimization epochs."""
 
-        # 2. Compute per-snippet relevance rewards
+        # --- 1. Rollout Phase (No Gradient) ---
+        self.encoder.eval()
+        with torch.no_grad():
+            rollout_contexts = [self.retriever.retrieve(problem) for problem in batch]
+
         all_snippet_rewards = []
-        for problem, context in zip(batch, contexts):
+        old_log_probs_list = []
+
+        for problem, context in zip(batch, rollout_contexts):
+            # Compute Rewards via LLM Judge
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
                 problem, snippets=context.snippets
             )
             all_snippet_rewards.append(snippet_rewards)
+            # Store old policy probabilities
+            old_log_probs_list.append(context.log_probs.detach())
 
         flat = [r for rewards in all_snippet_rewards for r in rewards]
         raw_mean_reward = sum(flat) / len(flat) if flat else 0.0
 
-        batch_losses = []
-        batch_rewards = []
-        batch_advantages = []
-        batch_entropies = []
-        batch_pg_losses = []
-        batch_baselines = []
+        # --- 2. Optimization Phase (PPO Epochs) ---
+        self.encoder.train()
+        final_metrics = {}
 
-        for context, snippet_rewards in zip(contexts, all_snippet_rewards):
-            loss_output = self.policy.compute_loss(
-                log_probs=context.log_probs,
-                snippet_rewards=snippet_rewards,
-            )
-            batch_losses.append(loss_output.loss)
-            batch_rewards.append(loss_output.raw_reward)
-            batch_advantages.append(loss_output.advantage)
-            batch_entropies.append(loss_output.entropy)
-            batch_pg_losses.append(loss_output.pg_loss)
-            batch_baselines.append(loss_output.baseline_val)
+        for epoch in range(self.ppo_epochs):
+            batch_losses, batch_rewards, batch_advantages = [], [], []
+            batch_entropies, batch_pg_losses, batch_ratios = [], [], []
 
-        # 3. Aggregate and backprop
-        total_loss = torch.stack(batch_losses).mean()
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.encoder.model.parameters(),
-            self.config.rl.max_grad_norm,
-        ).item()
-        self.optimizer.step()
+            for i, problem in enumerate(batch):
+                snippets = rollout_contexts[i].snippets
+                snippet_rewards = all_snippet_rewards[i]
+                old_log_probs = old_log_probs_list[i]
 
-        self.scheduler.step()
+                # [Optimization 1 trigger] Re-encode with active graph
+                new_log_probs, _ = self.retriever.rescore(problem, snippets)
 
-        n = len(batch_rewards)
-        mean_reward = sum(batch_rewards) / n
-        reward_std = (sum((r - mean_reward) ** 2 for r in batch_rewards) / n) ** 0.5
+                # Compute PPO Loss
+                loss_output = self.policy.compute_loss(
+                    log_probs=new_log_probs,
+                    old_log_probs=old_log_probs,
+                    snippet_rewards=snippet_rewards,
+                )
 
-        return {
-            "loss": total_loss.item(),
-            "pg_loss": sum(batch_pg_losses) / n,
-            "entropy": sum(batch_entropies) / n,
-            "mean_reward": raw_mean_reward,
-            "reward_std": reward_std,
-            "mean_advantage": sum(batch_advantages) / n,
-            "baseline": sum(batch_baselines) / n,
-            "grad_norm": grad_norm,
-            "snippet_rewards": flat,
-        }
+                batch_losses.append(loss_output.loss)
+                batch_rewards.append(loss_output.raw_reward)
+                batch_advantages.append(loss_output.advantage)
+                batch_entropies.append(loss_output.entropy)
+                batch_pg_losses.append(loss_output.pg_loss)
+                batch_ratios.append(loss_output.ratio)
+
+            total_loss = torch.stack(batch_losses).mean()
+
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.encoder.model.parameters(),
+                self.config.rl.max_grad_norm,
+            ).item()
+            self.optimizer.step()
+
+            # Step scheduler only once per batch (on the last PPO epoch)
+            if epoch == self.ppo_epochs - 1:
+                self.scheduler.step()
+
+            n = len(batch_rewards)
+            final_metrics = {
+                "loss": total_loss.item(),
+                "pg_loss": sum(batch_pg_losses) / n if n else 0,
+                "entropy": sum(batch_entropies) / n if n else 0,
+                "mean_reward": raw_mean_reward,
+                "mean_advantage": sum(batch_advantages) / n if n else 0,
+                "ppo_ratio": sum(batch_ratios) / n if n else 0,
+                "grad_norm": grad_norm,
+                "snippet_rewards": flat,
+            }
+
+        # --- 3. Dynamic Entropy Decay ---
+        self.policy.update_entropy_coeff(self.global_step, self.config.rl.max_steps)
+        final_metrics["ent_coeff"] = self.policy.entropy_coeff
+
+        return final_metrics
 
     def train(
-        self,
-        train_problems: List[HumanEvalProblem],
-        eval_problems: Optional[List[HumanEvalProblem]] = None,
-        resume_from: Optional[str] = None,
+            self,
+            train_problems: List[HumanEvalProblem],
+            eval_problems: Optional[List[HumanEvalProblem]] = None,
+            resume_from: Optional[str] = None,
     ) -> None:
         """Main training loop."""
         os.makedirs("outputs", exist_ok=True)
@@ -140,56 +165,47 @@ class RLTrainer:
             print(f"Resumed from step {self.global_step}")
 
         rl_cfg = self.config.rl
-
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
-
-        # Always rebuild index on startup to ensure corpus embeddings match current encoder
         self.retriever.refresh_index(step=self.global_step)
 
-        # Initial evaluation at step 0 (baseline before training)
         if eval_problems and self.global_step == 0:
             eval_metrics = self.evaluate(eval_problems)
             self.logger.log(eval_metrics, step=0, prefix="eval")
             print(f"\nStep 0 eval (baseline): {eval_metrics}")
 
         while self.global_step < rl_cfg.max_steps:
-            # Sample batch
             batch = random.sample(train_problems, min(rl_cfg.batch_size, len(train_problems)))
 
-            # Train step
             metrics = self.train_step(batch)
             self.global_step += 1
             pbar.update(1)
 
-            # Logging
             pbar.set_postfix({
                 "loss": f"{metrics['loss']:.4f}",
                 "rew": f"{metrics['mean_reward']:.3f}",
             })
+
             if self.global_step % rl_cfg.log_interval == 0:
                 self.logger.log(metrics, step=self.global_step)
+
             if self.global_step % rl_cfg.metrics_log_interval == 0:
                 self._metrics_log.write(
                     f"[step {self.global_step}] "
-                    f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} | "
-                    f"rew={metrics['mean_reward']:.4f}±{metrics['reward_std']:.4f}  "
-                    f"adv={metrics['mean_advantage']:.4f}  base={metrics['baseline']:.4f} | "
+                    f"loss={metrics['loss']:.4f}  pg={metrics['pg_loss']:.4f}  ent={metrics['entropy']:.4f} (coef={metrics['ent_coeff']:.4f}) | "
+                    f"rew={metrics['mean_reward']:.4f}  ratio={metrics['ppo_ratio']:.4f} | "
                     f"gnorm={metrics['grad_norm']:.4f} | "
                     f"snippet_rewards=[{', '.join(f'{r:.3f}' for r in metrics['snippet_rewards'])}]\n"
                 )
                 self._metrics_log.flush()
 
-            # Evaluation
             if eval_problems and self.global_step % rl_cfg.eval_interval == 0:
                 eval_metrics = self.evaluate(eval_problems)
                 self.logger.log(eval_metrics, step=self.global_step, prefix="eval")
                 print(f"\nStep {self.global_step} eval: {eval_metrics}")
 
-            # Refresh FAISS index
             if self.global_step % rl_cfg.index_refresh_interval == 0:
                 self.retriever.refresh_index(step=self.global_step)
 
-            # Checkpoint
             if self.global_step % rl_cfg.checkpoint_interval == 0:
                 ckpt_path = f"{self.config.output.checkpoint_dir}/step_{self.global_step}.pt"
                 save_checkpoint(ckpt_path, self.encoder, self.optimizer, self.global_step)
@@ -199,7 +215,6 @@ class RLTrainer:
         self._metrics_log.close()
 
     def evaluate(self, eval_problems: List[HumanEvalProblem]) -> dict:
-        """Evaluate retrieval quality on held-out CSN problems using the current CSN index."""
         eval_logs_root = os.path.join("outputs", "eval_logs")
         if self.global_step == 0 and os.path.exists(eval_logs_root):
             shutil.rmtree(eval_logs_root)
@@ -238,7 +253,8 @@ class RLTrainer:
                         for i, snippet in enumerate(ctx.snippets):
                             sim = sim_scores[i] if i < len(sim_scores) else float("nan")
                             llm_score = scores[i] if i < len(scores) else float("nan")
-                            lines.append(f"\n### Snippet {i + 1}  |  LLM Score: {llm_score:.4f}  |  Similarity: {sim:.4f}\n")
+                            lines.append(
+                                f"\n### Snippet {i + 1}  |  LLM Score: {llm_score:.4f}  |  Similarity: {sim:.4f}\n")
                             lines.append(f"Docstring: {snippet.docstring}\n")
                             lines.append(f"Code:\n{snippet.code}\n")
                         lines.append(f"\n## Weighted Relevance: {weighted_relevance:.4f}\n")

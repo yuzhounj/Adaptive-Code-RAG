@@ -2,7 +2,7 @@ import copy
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from src.retriever.encoder import CodeBERTEncoder
 from src.retriever.faiss_index import FaissIndex
@@ -12,11 +12,11 @@ from src.config import RetrieverConfig
 
 class DifferentiableRetriever:
     """
-    Retriever with gradient flow for REINFORCE training.
+    Retriever with gradient flow for PPO training.
 
-    FAISS retrieves top-k candidates (no_grad, periodic rebuild).
-    Then re-scores them differentiably: query_emb @ corpus_embs_k.T
-    log_prob = log_softmax(scores).sum() — gradient flows to query encoder.
+    FAISS retrieves top-k candidates (no_grad).
+    Then explicitly re-encodes the k documents text through the doc encoder
+    to preserve full computational graph for Dual-Encoder training.
     """
 
     def __init__(self, config: RetrieverConfig, encoder: CodeBERTEncoder):
@@ -34,21 +34,21 @@ class DifferentiableRetriever:
             self.doc_encoder = None
 
     def build_index(self, snippets: List[CodeSnippet], batch_size: int = 64) -> None:
-        """Encode corpus and build FAISS index. No gradient."""
         self.corpus_snippets = snippets
         device = next(self.encoder.model.parameters()).device
 
         all_embeddings = []
-        texts = [f"{s.docstring} {s.code}"[:512] for s in snippets]
+        texts = [f"{s.docstring}\n{s.code}"[:512] for s in snippets]
         enc = self.doc_encoder if self.doc_encoder is not None else self.encoder
 
         was_training = enc.training
         enc.eval()
         try:
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i:i + batch_size]
-                embs = enc.encode_corpus_batch(batch, device=device)
-                all_embeddings.append(embs)
+            with torch.no_grad():
+                for i in range(0, len(texts), batch_size):
+                    batch = texts[i:i + batch_size]
+                    embs = enc.encode_corpus_batch(batch, device=device)
+                    all_embeddings.append(embs)
         finally:
             if was_training:
                 enc.train()
@@ -57,54 +57,60 @@ class DifferentiableRetriever:
         self.faiss_index.build(corpus_embeddings)
 
     def refresh_index(self, step: int = 0) -> None:
-        """Rebuild FAISS index with updated encoder weights. Called periodically."""
         if self.config.freeze_doc_encoder:
-            return  # corpus embedding 固定，无需重建
+            return
         if self.corpus_snippets:
             print(f"Refreshing FAISS index at step {step}...")
             self.build_index(self.corpus_snippets)
 
-    def retrieve(
-        self,
-        problem: HumanEvalProblem,
-        top_k: Optional[int] = None,
-    ) -> RetrievedContext:
+    def rescore(self, problem: HumanEvalProblem, snippets: List[CodeSnippet]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Retrieve top-k snippets for a problem.
-        Returns RetrievedContext with gradient-attached log_probs.
+        [Optimization 1] Dual-Encoder Gradients:
+        Re-encode query AND specifically retrieved snippets with full gradient tracking.
         """
-        k = top_k or self.config.top_k
         device = next(self.encoder.model.parameters()).device
+        if not snippets:
+            dummy_tensor = torch.zeros(1, device=device, requires_grad=True)
+            return dummy_tensor, dummy_tensor
 
         # Encode query WITH gradient
         query_emb = self.encoder.encode_query(problem.prompt, device=device)  # [768]
 
-        # FAISS search (no grad)
-        query_np = query_emb.detach().cpu().numpy()
-        _, indices = self.faiss_index.search(query_np, k)
+        # Re-encode documents WITH gradient
+        doc_texts = [f"{s.docstring}\n{s.code}"[:512] for s in snippets]
+        enc = self.doc_encoder if self.doc_encoder is not None else self.encoder
+        corpus_embs_k = enc.encode(doc_texts, device=device, no_grad=False)  # [k, 768]
 
-        # Filter invalid indices
-        valid_mask = indices >= 0
-        indices = indices[valid_mask]
-
-        if len(indices) == 0:
-            # Fallback: return empty context with zero log_prob
-            dummy_log_prob = torch.zeros(1, device=device, requires_grad=True)
-            return RetrievedContext(
-                problem=problem,
-                snippets=[],
-                log_probs=dummy_log_prob,
-                scores=dummy_log_prob,
-            )
-
-        # Re-score differentiably: gradient flows through query_emb
-        corpus_embs_k = self.faiss_index.get_embeddings_by_indices(indices).to(device)  # [k, 768]
-        scores_k = query_emb @ corpus_embs_k.T  # [k], gradient flows here
-
+        # Re-score differentiably: gradient flows back to BOTH query and document encoders
+        scores_k = query_emb @ corpus_embs_k.T  # [k]
         log_probs_k = F.log_softmax(scores_k, dim=0)  # [k]
 
-        # Get corresponding snippets
+        return log_probs_k, scores_k
+
+    def retrieve(
+            self,
+            problem: HumanEvalProblem,
+            top_k: Optional[int] = None,
+    ) -> RetrievedContext:
+        k = top_k or self.config.top_k
+        device = next(self.encoder.model.parameters()).device
+
+        # FAISS search strictly without grad for speed and safety
+        with torch.no_grad():
+            query_emb_no_grad = self.encoder.encode_query(problem.prompt, device=device)
+            query_np = query_emb_no_grad.cpu().numpy()
+            _, indices = self.faiss_index.search(query_np, k)
+
+        valid_mask = indices >= 0
+        indices = indices[valid_mask]
         snippets = [self.corpus_snippets[idx] for idx in indices]
+
+        if not snippets:
+            dummy = torch.zeros(1, device=device, requires_grad=True)
+            return RetrievedContext(problem, [], dummy, dummy)
+
+        # Perform differentiable rescoring
+        log_probs_k, scores_k = self.rescore(problem, snippets)
 
         return RetrievedContext(
             problem=problem,
@@ -112,4 +118,3 @@ class DifferentiableRetriever:
             log_probs=log_probs_k,
             scores=scores_k,
         )
-
