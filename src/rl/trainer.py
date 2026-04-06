@@ -88,16 +88,15 @@ class RLTrainer:
         for epoch in range(self.ppo_epochs):
             batch_losses, batch_rewards, batch_advantages = [], [], []
             batch_entropies, batch_pg_losses, batch_ratios = [], [], []
+            batch_kl = []  # 新增：用于记录 KL 散度
 
             for i, problem in enumerate(batch):
                 snippets = rollout_contexts[i].snippets
                 snippet_rewards = all_snippet_rewards[i]
                 old_log_probs = old_log_probs_list[i]
 
-                # [Optimization 1 trigger] Re-encode with active graph
                 new_log_probs, _ = self.retriever.rescore(problem, snippets)
 
-                # Compute PPO Loss
                 loss_output = self.policy.compute_loss(
                     log_probs=new_log_probs,
                     old_log_probs=old_log_probs,
@@ -111,20 +110,28 @@ class RLTrainer:
                 batch_pg_losses.append(loss_output.pg_loss)
                 batch_ratios.append(loss_output.ratio)
 
+                # 【关键修改】：计算新旧策略的 KL 散度
+                with torch.no_grad():
+                    kl = (old_log_probs.exp() * (old_log_probs - new_log_probs)).sum().item()
+                    batch_kl.append(kl)
+
+            # --- KL Early Stopping 护盾 ---
+            mean_kl = sum(batch_kl) / len(batch_kl) if batch_kl else 0.0
+            if mean_kl > 0.05:  # PPO 标准的安全阈值
+                # 如果策略偏移过大，直接放弃本批次剩余的 Epoch，防止梯度爆炸
+                break
+
             total_loss = torch.stack(batch_losses).mean()
 
             self.optimizer.zero_grad()
-
-            total_loss.backward()
+            total_loss.backward(retain_graph=True)
 
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.encoder.model.parameters(),
                 self.config.rl.max_grad_norm,
             ).item()
-
             self.optimizer.step()
 
-            # Step scheduler only once per batch (on the last PPO epoch)
             if epoch == self.ppo_epochs - 1:
                 self.scheduler.step()
 

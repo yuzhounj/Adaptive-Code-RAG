@@ -85,7 +85,7 @@ class DifferentiableRetriever:
         scores_k = query_emb @ corpus_embs_k.T  # [k]
 
         # 【关键修复：温度缩放 Temperature Scaling】
-        temperature = 0.05
+        temperature = 0.2
         scaled_scores = scores_k / temperature
 
         log_probs_k = F.log_softmax(scaled_scores, dim=0)  # [k]
