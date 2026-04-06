@@ -81,9 +81,14 @@ class DifferentiableRetriever:
         enc = self.doc_encoder if self.doc_encoder is not None else self.encoder
         corpus_embs_k = enc.encode(doc_texts, device=device, no_grad=False)  # [k, 768]
 
-        # Re-score differentiably: gradient flows back to BOTH query and document encoders
+        # Re-score differentiably
         scores_k = query_emb @ corpus_embs_k.T  # [k]
-        log_probs_k = F.log_softmax(scores_k, dim=0)  # [k]
+
+        # 【关键修复：温度缩放 Temperature Scaling】
+        temperature = 0.05
+        scaled_scores = scores_k / temperature
+
+        log_probs_k = F.log_softmax(scaled_scores, dim=0)  # [k]
 
         return log_probs_k, scores_k
 

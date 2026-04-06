@@ -114,11 +114,14 @@ class RLTrainer:
             total_loss = torch.stack(batch_losses).mean()
 
             self.optimizer.zero_grad()
+
             total_loss.backward()
+
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.encoder.model.parameters(),
                 self.config.rl.max_grad_norm,
             ).item()
+
             self.optimizer.step()
 
             # Step scheduler only once per batch (on the last PPO epoch)
