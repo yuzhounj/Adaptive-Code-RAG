@@ -137,8 +137,8 @@ class RLTrainer:
             # --- KL Early Stopping Shield ---
             mean_kl = sum(batch_kl) / len(batch_kl) if batch_kl else 0.0
             if mean_kl > 0.05:
-                # 策略偏移过大，为了防止灾难性遗忘，提前结束对当前批次的多轮优化
-                print(f"  [Early Stop] KL={mean_kl:.4f} > 0.05 at epoch {epoch}")
+                # 如果策略偏移过大，直接放弃本批次剩余的 Epoch，防止梯度爆炸
+                tqdm.write(f"  [Early Stop] KL={mean_kl:.4f} > 0.05 at epoch {epoch}")
                 break
 
             self.optimizer.zero_grad()
