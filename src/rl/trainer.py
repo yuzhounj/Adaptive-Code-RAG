@@ -18,7 +18,7 @@ from transformers import get_linear_schedule_with_warmup
 
 
 class RLTrainer:
-    """Full closed-loop RL training loop upgraded with PPO."""
+    """Full closed-loop RL training loop upgraded with PPO and strict gradient safety."""
 
     def __init__(
             self,
@@ -36,11 +36,11 @@ class RLTrainer:
         self.reward_fn = reward_fn
         self.device = device
 
-        # Initialize PPO Policy
+        # Initialize PPO Policy with Dynamic Entropy
         self.policy = PPOPolicy(
             initial_entropy_coeff=config.rl.entropy_coeff,
-            min_entropy_coeff=0.001,  # Floor entropy
-            clip_eps=0.2  # Standard PPO clip
+            min_entropy_coeff=0.001,  # 设定熵衰减的下限
+            clip_eps=0.2  # PPO 标准截断范围
         )
 
         self.optimizer = torch.optim.AdamW(
@@ -56,12 +56,13 @@ class RLTrainer:
 
         self.logger = TrainingLogger(config)
         self.global_step = 0
-        self.ppo_epochs = 3  # Multiple optimization passes over the same batch
+        self.ppo_epochs = 3  # PPO: 对同一个 Batch 优化 3 轮
 
     def train_step(self, batch: List[HumanEvalProblem]) -> dict:
         """Run one PPO training step consisting of Rollout and Optimization epochs."""
 
         # --- 1. Rollout Phase (No Gradient) ---
+        # 冻结计算图，执行粗排检索和 LLM 打分获取旧策略基准
         self.encoder.eval()
         with torch.no_grad():
             rollout_contexts = [self.retriever.retrieve(problem) for problem in batch]
@@ -70,12 +71,12 @@ class RLTrainer:
         old_log_probs_list = []
 
         for problem, context in zip(batch, rollout_contexts):
-            # Compute Rewards via LLM Judge
+            # 获取 LLM Judge 的打分
             snippet_rewards = self.reward_fn.compute_snippet_rewards(
                 problem, snippets=context.snippets
             )
             all_snippet_rewards.append(snippet_rewards)
-            # Store old policy probabilities
+            # 记录旧的概率，用于后续 PPO Ratio 计算
             old_log_probs_list.append(context.log_probs.detach())
 
         flat = [r for rewards in all_snippet_rewards for r in rewards]
@@ -88,15 +89,17 @@ class RLTrainer:
         for epoch in range(self.ppo_epochs):
             batch_losses, batch_rewards, batch_advantages = [], [], []
             batch_entropies, batch_pg_losses, batch_ratios = [], [], []
-            batch_kl = []  # 新增：用于记录 KL 散度
+            batch_kl = []
 
             for i, problem in enumerate(batch):
                 snippets = rollout_contexts[i].snippets
                 snippet_rewards = all_snippet_rewards[i]
                 old_log_probs = old_log_probs_list[i]
 
+                # 重新开启计算图获取最新的梯度和 Log Probs (Dual-Encoder Re-score)
                 new_log_probs, _ = self.retriever.rescore(problem, snippets)
 
+                # 计算 PPO Loss
                 loss_output = self.policy.compute_loss(
                     log_probs=new_log_probs,
                     old_log_probs=old_log_probs,
@@ -110,32 +113,16 @@ class RLTrainer:
                 batch_pg_losses.append(loss_output.pg_loss)
                 batch_ratios.append(loss_output.ratio)
 
-                # 【关键修改】：计算新旧策略的 KL 散度
+                # 计算新旧策略的 KL 散度，作为安全护盾
                 with torch.no_grad():
                     kl = (old_log_probs.exp() * (old_log_probs - new_log_probs)).sum().item()
                     batch_kl.append(kl)
 
-            # --- KL Early Stopping 护盾 ---
-            mean_kl = sum(batch_kl) / len(batch_kl) if batch_kl else 0.0
-            if mean_kl > 0.05:  # PPO 标准的安全阈值
-                # 如果策略偏移过大，直接放弃本批次剩余的 Epoch，防止梯度爆炸
-                break
-
             total_loss = torch.stack(batch_losses).mean()
-
-            self.optimizer.zero_grad()
-            total_loss.backward(retain_graph=True)
-
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.encoder.model.parameters(),
-                self.config.rl.max_grad_norm,
-            ).item()
-            self.optimizer.step()
-
-            if epoch == self.ppo_epochs - 1:
-                self.scheduler.step()
-
             n = len(batch_rewards)
+
+            # 【关键修复】在任何 break 前，优先组装基础 metrics
+            # 确保无论什么情况提前退出，都会返回一个合法的包含 "loss" 等键的字典
             final_metrics = {
                 "loss": total_loss.item(),
                 "pg_loss": sum(batch_pg_losses) / n if n else 0,
@@ -143,9 +130,34 @@ class RLTrainer:
                 "mean_reward": raw_mean_reward,
                 "mean_advantage": sum(batch_advantages) / n if n else 0,
                 "ppo_ratio": sum(batch_ratios) / n if n else 0,
-                "grad_norm": grad_norm,
+                "grad_norm": 0.0,  # 赋初值，若成功反传会被覆盖
                 "snippet_rewards": flat,
             }
+
+            # --- KL Early Stopping Shield ---
+            mean_kl = sum(batch_kl) / len(batch_kl) if batch_kl else 0.0
+            if mean_kl > 0.05:
+                # 策略偏移过大，为了防止灾难性遗忘，提前结束对当前批次的多轮优化
+                print(f"  [Early Stop] KL={mean_kl:.4f} > 0.05 at epoch {epoch}")
+                break
+
+            self.optimizer.zero_grad()
+
+            # 【关键修复】安全的标准反向传播，丢弃旧图，防显存爆炸
+            total_loss.backward()
+
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.encoder.model.parameters(),
+                self.config.rl.max_grad_norm,
+            ).item()
+
+            # 更新真实的梯度范数
+            final_metrics["grad_norm"] = grad_norm
+
+            self.optimizer.step()
+
+        # 对每个 Batch，优化完成后走一步调度器
+        self.scheduler.step()
 
         # --- 3. Dynamic Entropy Decay ---
         self.policy.update_entropy_coeff(self.global_step, self.config.rl.max_steps)
@@ -176,6 +188,8 @@ class RLTrainer:
 
         rl_cfg = self.config.rl
         pbar = tqdm(total=rl_cfg.max_steps, initial=self.global_step, desc="Training")
+
+        # 启动时先构建一次 FAISS 索引
         self.retriever.refresh_index(step=self.global_step)
 
         if eval_problems and self.global_step == 0:
