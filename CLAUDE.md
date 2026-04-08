@@ -3,7 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Description: Adaptive-Code-RAG
-A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFORCE policy gradient to end-to-end train a CodeBERT retriever. The goal is to make retrieval serve "code generation quality" rather than semantic similarity alone.
+A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFORCE policy gradient to end-to-end train a CodeBERT retriever. The training goal is to maximize the LLM-judged relevance score of retrieved snippets, going beyond simple semantic similarity.
+
+**Training** (CodeSearchNet) uses LLM relevance scores as the reward signal — no code generation during training. Periodic evaluation every `eval_interval` steps uses a held-out CSN split and measures `avg_snippet_relevance`. **Final validation** (`scripts/compare_eval.py`) runs code generation on HumanEval to measure pass rate.
 
 ## Commands
 

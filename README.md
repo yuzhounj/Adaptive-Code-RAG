@@ -1,18 +1,22 @@
 # Adaptive-Code-RAG
 
-A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFORCE policy gradient to end-to-end train a CodeBERT retriever. The goal is to make retrieval serve "code generation quality" rather than semantic similarity alone.
+A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFORCE policy gradient to end-to-end train a CodeBERT retriever. The training goal is to maximize the LLM-judged relevance score of retrieved snippets, going beyond simple semantic similarity.
+
+**Training** (CodeSearchNet) uses LLM relevance scores as the reward signal — no code generation during training. **Final validation** (`scripts/compare_eval.py`) runs code generation on HumanEval to measure pass rate.
 
 ## System Overview
 
+### Training Loop (CodeSearchNet, no code generation)
+
 ```
-Query (CodeSearchNet docstring / HumanEval problem)
+CodeSearchNet query (docstring)
         │
         ▼
 CodeBERT Encoder (trainable)
         │  query_emb [768]
         ▼
 FAISS Index (periodic rebuild)
-        │  top-k candidate indices
+        │  top-k candidate indices (no gradient)
         ▼
 Differentiable Re-scoring
         │  scores = query_emb @ corpus_embs.T
@@ -21,23 +25,29 @@ Differentiable Re-scoring
 Retrieved Code Snippets
         │
         ▼
-Prompt Builder
-        │
-        ▼
-LLM Generator (Qwen2.5-Coder via Ollama, frozen)
-        │  n=1 code completions
-        ▼
-Reward Function (per-snippet, training)
-  - relevance_score: LLM score for how helpful the snippet is (0~1)
-  - snippet_reward = relevance_score
-  (execution reward only used during HumanEval evaluation, not training)
-        │
+SnippetRelevanceJudge (LLM-as-judge, frozen)
+        │  relevance_score ∈ [0, 1] per snippet
         ▼
 REINFORCE Loss (per-snippet)
-  loss = -sum_i(log_probs[i] * (snippet_reward[i] - baseline)) - entropy_bonus
+  loss = -sum_i(log_probs[i] * (relevance_i - EMA_baseline)) - entropy_bonus
         │
         ▼
-AdamW update → CodeBERT encoder
+AdamW update → CodeBERT encoder only
+```
+
+### Final Validation (HumanEval, via compare_eval.py)
+
+```
+HumanEval problem
+        │
+        ▼
+CodeBERT Encoder (frozen checkpoint)  →  HumanEval FAISS index
+        │  retrieved snippets
+        ▼
+Prompt Builder  →  LLM Generator (Qwen2.5-Coder, frozen)
+        │  generated code
+        ▼
+Test Executor  →  pass@k
 ```
 
 ## Quick Start
