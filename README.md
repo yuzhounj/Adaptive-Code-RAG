@@ -114,7 +114,32 @@ python scripts/evaluate.py
 python scripts/evaluate.py --baseline
 ```
 
-### Step 4: Generate Samples
+### Step 4: Ablation Experiments
+
+Run systematic ablation experiments across four dimensions: `top_k`, `entropy_coeff`, `index_refresh_interval`, and `relevance_model`.
+
+```bash
+bash scripts/run_ablation.sh            # run all groups (11 runs total)
+bash scripts/run_ablation.sh top_k      # only top_k group
+bash scripts/run_ablation.sh entropy    # only entropy_coeff group
+bash scripts/run_ablation.sh refresh    # only index_refresh_interval group
+bash scripts/run_ablation.sh relevance  # only relevance_model group
+```
+
+Each run saves its checkpoint to `outputs/ablation/<name>/` and TensorBoard logs to `outputs/logs/ablation/<name>/`. View all curves side by side:
+
+```bash
+tensorboard --logdir outputs/logs/ablation
+```
+
+| Group | Variants | Default |
+|---|---|---|
+| `top_k` | 2, 5, 7 | **3** |
+| `entropy_coeff` | 0.0, 0.001, 0.1 | **0.01** |
+| `index_refresh_interval` | 50, 200, 99999 | **500** |
+| `relevance_model` | qwen2.5-coder:3b, :7b | **:14b** |
+
+### Step 5: Generate Samples
 
 ```bash
 # Generate for first 3 HumanEval problems

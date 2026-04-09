@@ -34,6 +34,11 @@ python scripts/compare_eval.py                                                  
 python scripts/compare_eval.py --checkpoint outputs/checkpoints/step_5000.pt       # all three columns
 tensorboard --logdir outputs/logs/eval_comparison                                   # view results
 
+# Ablation experiments (top_k / entropy_coeff / index_refresh_interval / relevance_model)
+bash scripts/run_ablation.sh                                        # run all groups
+bash scripts/run_ablation.sh top_k                                  # single group
+tensorboard --logdir outputs/logs/ablation                          # view all curves
+
 # Inference demo
 python scripts/generate_samples.py --task-id "HumanEval/42" --n 4
 
