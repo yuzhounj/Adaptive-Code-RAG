@@ -134,7 +134,7 @@ tensorboard --logdir outputs/logs/ablation
 
 | Group | Variants | Default |
 |---|---|---|
-| `top_k` | 2, 5, 7 | **3** |
+| `top_k` | 2, 5 | **3** |
 | `entropy_coeff` | 0.0, 0.001, 0.1 | **0.01** |
 | `index_refresh_interval` | 50, 200, 99999 | **500** |
 | `relevance_model` | qwen2.5-coder:3b, :7b | **:14b** |

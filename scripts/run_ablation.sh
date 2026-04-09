@@ -53,7 +53,6 @@ run_top_k() {
     echo "########## Ablation: top_k ##########"
     run_experiment "top_k_2" retriever.top_k=2
     run_experiment "top_k_5" retriever.top_k=5
-    run_experiment "top_k_7" retriever.top_k=7
 }
 
 # ---------------------------------------------------------------------------
