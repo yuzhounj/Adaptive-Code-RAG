@@ -350,15 +350,6 @@ header {
   box-shadow: 0 0 12px rgba(96,165,250,0.15);
 }
 
-.avg-score-header {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-family: var(--font-code);
-  opacity: 0;
-  transition: var(--transition);
-}
-
-.avg-score-header.visible { opacity: 1; }
 
 /* ─── Results container ──────────────────────────────────────────────── */
 .results-container {
@@ -471,39 +462,6 @@ header {
   border: 1px solid var(--border);
 }
 
-.score-bar-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.score-bar-track {
-  flex: 1;
-  height: 4px;
-  background: rgba(255,255,255,0.05);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.score-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
-}
-
-.score-val {
-  font-family: var(--font-code);
-  font-size: 12px;
-  font-weight: 500;
-  min-width: 38px;
-  text-align: right;
-}
-
-/* score color helpers */
-.score-hi { color: var(--score-hi); background: var(--score-hi); }
-.score-mid { color: var(--score-mid); background: var(--score-mid); }
-.score-lo { color: var(--score-lo); background: var(--score-lo); }
 
 /* docstring */
 .docstring {
@@ -554,24 +512,6 @@ header {
   display: block;
 }
 
-/* ─── Footer strip ───────────────────────────────────────────────────── */
-.avg-footer {
-  padding: 10px 20px;
-  border-top: 1px solid var(--border);
-  background: rgba(255,255,255,0.015);
-  font-size: 12px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-family: var(--font-code);
-  opacity: 0;
-  transition: var(--transition);
-}
-
-.avg-footer.visible { opacity: 1; }
-
-.avg-footer span { color: var(--text); font-weight: 600; }
 
 /* ─── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
@@ -902,17 +842,12 @@ header {
           <h2>Pretrained CodeBERT</h2>
           <span class="badge badge-pre">Baseline</span>
         </div>
-        <div class="avg-score-header" id="preAvgHeader"></div>
       </div>
       <div class="results-container" id="preResults">
         <div class="placeholder">
           <div class="placeholder-icon">⌕</div>
           <div>Enter a query to retrieve code snippets</div>
         </div>
-      </div>
-      <div class="avg-footer" id="preFooter">
-        <span>avg similarity</span>
-        <span id="preAvgVal">—</span>
       </div>
     </div>
 
@@ -923,17 +858,12 @@ header {
           <h2>RL-Trained CodeBERT</h2>
           <span class="badge badge-rl" id="rlStepBadge">Step —</span>
         </div>
-        <div class="avg-score-header" id="rlAvgHeader"></div>
       </div>
       <div class="results-container" id="rlResults">
         <div class="placeholder">
           <div class="placeholder-icon">⌕</div>
           <div>Enter a query to retrieve code snippets</div>
         </div>
-      </div>
-      <div class="avg-footer" id="rlFooter">
-        <span>avg similarity</span>
-        <span id="rlAvgVal">—</span>
       </div>
     </div>
 
@@ -1036,18 +966,6 @@ document.getElementById('queryInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
 
-// ── Score helpers ───────────────────────────────────────────────────────────
-
-function scoreClass(s) {
-  if (s >= 0.8) return 'score-hi';
-  if (s >= 0.6) return 'score-mid';
-  return 'score-lo';
-}
-
-function avg(arr) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b.score, 0) / arr.length;
-}
 
 // ── Skeleton loader ─────────────────────────────────────────────────────────
 
@@ -1078,9 +996,6 @@ function renderResults(container, items, referenceRankMap, accentClass) {
   }
 
   container.innerHTML = items.map(it => {
-    const cls   = scoreClass(it.score);
-    const pct   = Math.round(it.score * 100);
-
     // rank diff badge (only for RL column when referenceRankMap provided)
     let diffBadge = '';
     if (referenceRankMap && it.snippet_id in referenceRankMap) {
@@ -1098,12 +1013,6 @@ function renderResults(container, items, referenceRankMap, accentClass) {
       ${diffBadge}
       <div class="card-top">
         <div class="rank-badge">${it.rank}</div>
-        <div class="score-bar-wrap">
-          <div class="score-bar-track">
-            <div class="score-bar-fill ${cls}" style="width:${pct}%"></div>
-          </div>
-          <div class="score-val ${cls}">${it.score.toFixed(3)}</div>
-        </div>
       </div>
       <div class="docstring" title="${escapedDoc}">${escapedDoc || '<em>No docstring</em>'}</div>
       <div class="code-wrap">
@@ -1146,10 +1055,6 @@ async function doSearch() {
   preCont.innerHTML = skeletonHTML(topK);
   rlCont.innerHTML  = skeletonHTML(topK);
 
-  // Hide footers
-  ['preFooter','rlFooter','preAvgHeader','rlAvgHeader'].forEach(id => {
-    document.getElementById(id).classList.remove('visible');
-  });
 
   try {
     const res  = await fetch('/search', {
@@ -1169,16 +1074,6 @@ async function doSearch() {
     renderResults(rlCont,  rlItems,  preRankMap, 'rl');
 
     // Footer stats
-    if (preItems.length) {
-      const a = avg(preItems).toFixed(3);
-      document.getElementById('preAvgVal').textContent = a;
-      document.getElementById('preFooter').classList.add('visible');
-    }
-    if (rlItems.length) {
-      const a = avg(rlItems).toFixed(3);
-      document.getElementById('rlAvgVal').textContent = a;
-      document.getElementById('rlFooter').classList.add('visible');
-    }
 
   } catch(e) {
     preCont.innerHTML = `<div class="placeholder"><div class="placeholder-icon">⚠</div><div>Request failed: ${e.message}</div></div>`;
