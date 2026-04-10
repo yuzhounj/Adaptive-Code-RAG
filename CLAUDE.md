@@ -39,6 +39,10 @@ bash scripts/run_ablation.sh                                        # run all gr
 bash scripts/run_ablation.sh top_k                                  # single group
 tensorboard --logdir outputs/logs/ablation                          # view all curves
 
+# Code search web demo (Pretrained vs RL-Trained side-by-side)
+python scripts/search_server.py --checkpoint outputs/checkpoints/step_3000.pt
+# visit http://127.0.0.1:8000
+
 # Inference demo
 python scripts/generate_samples.py --task-id "HumanEval/42" --n 4
 

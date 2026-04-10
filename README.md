@@ -139,15 +139,25 @@ tensorboard --logdir outputs/logs/ablation
 | `index_refresh_interval` | 50, 200, 99999 | **500** |
 | `relevance_model` | qwen2.5-coder:3b, :7b | **:14b** |
 
-### Step 5: Generate Samples
+### Step 5: Code Search Demo (Web UI)
+
+Launch a local web server for interactive side-by-side comparison of Pretrained vs RL-Trained CodeBERT retrieval.
 
 ```bash
-# Generate for first 3 HumanEval problems
-python scripts/generate_samples.py --n 4
+pip install fastapi uvicorn
 
-# Generate for specific task
-python scripts/generate_samples.py --task-id "HumanEval/42" --n 4
+python scripts/search_server.py --checkpoint outputs/checkpoints/step_3000.pt
+# Open http://127.0.0.1:8000
 ```
+
+Features:
+- Enter a natural language query; results from both models appear in parallel columns
+- Adjustable Top-K slider (1–10)
+- Score bars color-coded by value; rank-change indicators (▲/▼) highlight snippets that moved between models
+- **Corpus Management** drawer (bottom of page): add custom code snippets and soft-delete existing ones
+  - Changes are persisted across restarts in `data/corpus/user_snippets.json` and `data/corpus/deleted_ids.json`
+  - The original corpus is never modified
+
 
 ## Project Structure
 
@@ -184,7 +194,10 @@ Adaptive-Code-RAG/
 │   ├── build_corpus.py
 │   ├── train.py
 │   ├── evaluate.py
-│   └── generate_samples.py
+│   ├── generate_samples.py
+│   └── search_server.py       # FastAPI web server for interactive code search demo
+├── web/
+│   └── index.html             # Single-page frontend (served by search_server.py)
 └── tests/
     ├── test_data.py
     ├── test_retriever.py
