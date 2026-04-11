@@ -39,6 +39,7 @@ run_experiment() {
     python scripts/train.py \
         output.checkpoint_dir="${ckpt_dir}" \
         logging.log_dir="${log_dir}" \
+        rl.eval_metric_top_k=2 \
         "$@" \
         2>&1 | tee "${log_file}"
 
@@ -52,6 +53,7 @@ run_top_k() {
     echo ""
     echo "########## Ablation: top_k ##########"
     run_experiment "top_k_2" retriever.top_k=2
+    run_experiment "top_k_3" retriever.top_k=3
     run_experiment "top_k_5" retriever.top_k=5
 }
 

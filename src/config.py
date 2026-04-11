@@ -47,6 +47,7 @@ class RLConfig:
     log_interval: int = 10
     metrics_log_interval: int = 1
     index_refresh_interval: int = 50
+    eval_metric_top_k: Optional[int] = None  # if set, avg_snippet_relevance uses only top-N snippets (ablation fairness)
 
 
 @dataclass

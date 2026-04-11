@@ -219,12 +219,14 @@ class RLTrainer:
                 problem_scores.append(flat_scores[idx:idx + n])
                 idx += n
 
+            metric_top_k = self.cfg.rl.eval_metric_top_k
             all_rel_scores = []
             for case_idx, (p, ctx, scores) in enumerate(zip(eval_problems, contexts, problem_scores)):
                 if ctx.snippets:
-                    weights = [1.0 / (i + 1) for i in range(len(scores))]
+                    eval_scores = scores[:metric_top_k] if metric_top_k is not None else scores
+                    weights = [1.0 / (i + 1) for i in range(len(eval_scores))]
                     total_w = sum(weights)
-                    weighted_relevance = sum(w * s for w, s in zip(weights, scores)) / total_w
+                    weighted_relevance = sum(w * s for w, s in zip(weights, eval_scores)) / total_w
                     all_rel_scores.append(weighted_relevance)
 
                     if case_idx < 10:
