@@ -219,7 +219,7 @@ class RLTrainer:
                 problem_scores.append(flat_scores[idx:idx + n])
                 idx += n
 
-            metric_top_k = self.cfg.rl.eval_metric_top_k
+            metric_top_k = self.config.rl.eval_metric_top_k
             all_rel_scores = []
             for case_idx, (p, ctx, scores) in enumerate(zip(eval_problems, contexts, problem_scores)):
                 if ctx.snippets:
