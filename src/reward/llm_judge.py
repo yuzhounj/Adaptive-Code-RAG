@@ -59,7 +59,7 @@ class SnippetRelevanceJudge:
                 raise ValueError(f"Score out of range [0, 1]: {score!r}")
             return round(score, 1)
         except Exception as e:
-            raise RuntimeError(f"Relevance judge failed (response: {text!r}): {e}") from e
+            return 0.0
 
     async def score_batch_async(
         self, problem: HumanEvalProblem, snippets: List[CodeSnippet]
