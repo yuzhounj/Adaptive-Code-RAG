@@ -3,9 +3,9 @@
 对比三种配置在 HumanEval 上的通过率，用于汇报展示。
 
 三列对比：
-  1. Baseline          : qwen2.5:1.5b，无检索
-  2. Pretrained        : qwen2.5:1.5b + CodeBERT 预训练权重
-  3. RL-Trained        : qwen2.5:1.5b + CodeBERT + REINFORCE 训练后
+  1. Baseline          : qwen2.5:7b，无检索
+  2. Pretrained        : qwen2.5:7b + CodeBERT 预训练权重
+  3. RL-Trained        : qwen2.5:7b + CodeBERT + REINFORCE 训练后
 
 输出：
   - outputs/eval_comparison/comparison.png  — 本地柱状图（pass@1）
