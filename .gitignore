@@ -13,3 +13,4 @@ wandb/
 Modelfile_7b
 Modelfile_14b
 step_3000.pt
+/ollama-linux-amd64
