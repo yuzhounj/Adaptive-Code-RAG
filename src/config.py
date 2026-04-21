@@ -48,6 +48,8 @@ class RLConfig:
     metrics_log_interval: int = 1
     index_refresh_interval: int = 50
     eval_metric_top_k: Optional[int] = None  # if set, avg_snippet_relevance uses only top-N snippets (ablation fairness)
+    advantage_method: str = "ema_baseline"  # "ema_baseline" or "grpo_softmax"
+    grpo_temperature: float = 1.0  # temperature for GRPO softmax
 
 
 @dataclass

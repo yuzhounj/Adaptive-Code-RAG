@@ -38,6 +38,8 @@ class RLTrainer:
         self.policy = REINFORCEPolicy(
             baseline_decay=config.rl.baseline_decay,
             entropy_coeff=config.rl.entropy_coeff,
+            advantage_method=config.rl.advantage_method,
+            grpo_temperature=config.rl.grpo_temperature,
         )
 
         self.optimizer = torch.optim.AdamW(
