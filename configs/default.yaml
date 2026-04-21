@@ -35,6 +35,8 @@ rl:
   index_refresh_interval: 500
   advantage_method: "grpo_softmax"  # "ema_baseline" or "grpo_softmax"
   grpo_temperature: 1.0
+  global_penalty_coeff: 0.0  # coefficient for global penalty, 0.0 means disabled
+  global_penalty_threshold: 0.0  # threshold to trigger penalty (avg_reward < reference - threshold)
 
 data:
   cache_dir: "data/cache"

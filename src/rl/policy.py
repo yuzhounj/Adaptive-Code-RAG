@@ -28,6 +28,8 @@ class RunningMeanBaseline:
         self._initialized = False
 
 
+
+
 @dataclass
 class PolicyLossOutput:
     loss: torch.Tensor
@@ -52,11 +54,15 @@ class REINFORCEPolicy:
         entropy_coeff: float = 0.01,
         advantage_method: str = "ema_baseline",
         grpo_temperature: float = 1.0,
+        global_penalty_coeff: float = 0.0,
+        global_penalty_threshold: float = 0.0,
     ):
         self.baseline = RunningMeanBaseline(decay=baseline_decay)
         self.entropy_coeff = entropy_coeff
         self.advantage_method = advantage_method
         self.grpo_temperature = grpo_temperature
+        self.global_penalty_coeff = global_penalty_coeff
+        self.global_penalty_threshold = global_penalty_threshold
 
         if advantage_method not in ["ema_baseline", "grpo_softmax"]:
             raise ValueError(f"Unknown advantage_method: {advantage_method}")
@@ -119,7 +125,6 @@ class REINFORCEPolicy:
         if self.advantage_method == "ema_baseline":
             # Original EMA baseline method
             baseline_val = self.baseline.get()
-            self.baseline.update(mean_reward)
 
             raw_advantages = torch.tensor(
                 [r - baseline_val for r in snippet_rewards],
@@ -154,6 +159,17 @@ class REINFORCEPolicy:
         entropy = -(probs * log_probs).sum()
 
         loss = pg_loss - self.entropy_coeff * entropy
+
+        # Apply global penalty if enabled and quality is below reference
+        if self.global_penalty_coeff > 0:
+            reference = self.baseline.get()  # Use updated baseline as reference
+            penalty_gap = reference - mean_reward - self.global_penalty_threshold
+            if penalty_gap > 0:
+                # log_probs.sum() is negative, penalty is negative, adding to loss makes loss more negative
+                penalty = self.global_penalty_coeff * penalty_gap * log_probs.sum()
+                loss = loss + penalty
+
+        self.baseline.update(mean_reward)
 
         return PolicyLossOutput(
             loss=loss,

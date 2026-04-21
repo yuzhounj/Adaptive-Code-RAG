@@ -40,6 +40,8 @@ class RLTrainer:
             entropy_coeff=config.rl.entropy_coeff,
             advantage_method=config.rl.advantage_method,
             grpo_temperature=config.rl.grpo_temperature,
+            global_penalty_coeff=config.rl.global_penalty_coeff,
+            global_penalty_threshold=config.rl.global_penalty_threshold,
         )
 
         self.optimizer = torch.optim.AdamW(

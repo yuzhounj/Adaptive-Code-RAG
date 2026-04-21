@@ -100,7 +100,7 @@ HumanEval problem → build HumanEval index (current encoder) → retrieve top-k
 
 - **`src/retriever/retriever.py`**: `DifferentiableRetriever` — the architectural core. `retrieve()` returns `RetrievedContext` with gradient-attached `log_probs` used directly in REINFORCE loss.
 
-- **`src/rl/policy.py`**: `REINFORCEPolicy` with `RunningMeanBaseline` (EMA, decay=0.99). Per-snippet loss = `-sum_i(log_probs[i] * (snippet_reward[i] - baseline)) - entropy_coeff * entropy`. Each snippet gets an independent gradient signal. Entropy bonus prevents retrieval collapse.
+- **`src/rl/policy.py`**: `REINFORCEPolicy` with `RunningMeanBaseline` (EMA, decay=0.99). Per-snippet loss = `-sum_i(log_probs[i] * (snippet_reward[i] - baseline)) - entropy_coeff * entropy`. Each snippet gets an independent gradient signal. Entropy bonus prevents retrieval collapse. Supports multiple advantage methods: `"ema_baseline"` (original EMA), `"grpo_softmax"` (group-relative softmax normalization), and optional global penalty via `global_penalty_coeff` to lower probabilities of all retrieved snippets when their average relevance is below a running quality reference.
 
 - **`src/reward/executor.py`**: Runs generated code via `subprocess.run()` with a timeout. The test script is assembled as `function_code + "\n\n" + problem.test + f"\ncheck({entry_point})"`. Returns 1.0/0.0 binary.
 
@@ -112,6 +112,20 @@ CLI overrides use dot-notation positional args (no `--` prefix):
 ```bash
 python scripts/train.py rl.batch_size=4 data.codesearchnet_max_samples=5000
 ```
+
+### Global Penalty Configuration
+
+To enable global penalty that lowers probabilities of all retrieved snippets when their average relevance is below a running quality reference:
+```bash
+python scripts/train.py rl.advantage_method=ema_baseline rl.global_penalty_coeff=0.2 rl.global_penalty_threshold=0.05
+```
+
+Or with GRPO:
+```bash
+python scripts/train.py rl.advantage_method=grpo_softmax rl.global_penalty_coeff=0.1
+```
+
+Set `global_penalty_coeff=0.0` to disable (default). The penalty term is: `penalty = coeff × max(0, reference - avg_reward - threshold) × sum(log_probs)` where `reference` is the EMA baseline (same decay rate as baseline).
 
 ### Data Layout
 

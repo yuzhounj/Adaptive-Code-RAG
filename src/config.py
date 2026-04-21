@@ -50,6 +50,8 @@ class RLConfig:
     eval_metric_top_k: Optional[int] = None  # if set, avg_snippet_relevance uses only top-N snippets (ablation fairness)
     advantage_method: str = "ema_baseline"  # "ema_baseline" or "grpo_softmax"
     grpo_temperature: float = 1.0  # temperature for GRPO softmax
+    global_penalty_coeff: float = 0.0  # coefficient for global penalty, 0.0 means disabled
+    global_penalty_threshold: float = 0.0  # threshold to trigger penalty (avg_reward < reference - threshold)
 
 
 @dataclass
