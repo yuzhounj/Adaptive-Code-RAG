@@ -10,3 +10,4 @@ build/
 wandb/
 *.log
 .idea/
+/graduate/
