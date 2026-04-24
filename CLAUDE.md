@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## User Preferences
+
+- **Plan first**: Always create a plan and get user approval before writing any code. Never skip planning and jump straight into implementation.
+- **Ask early, ask often**: When requirements are unclear, multiple approaches exist, or changes may affect existing architecture, proactively ask the user for clarification. Don't make assumptions.
+
 ## Project Description: Adaptive-Code-RAG
 A closed-loop optimization RAG system that uses LLM evaluation feedback + REINFORCE policy gradient to end-to-end train a CodeBERT retriever. The training goal is to maximize the LLM-judged relevance score of retrieved snippets, going beyond simple semantic similarity.
 
@@ -66,11 +71,13 @@ FAISS does not support gradients, so retrieval uses a two-stage trick:
 
 The corpus embeddings stored in `FaissIndex.corpus_embeddings` (numpy) are periodically rebuilt via `retriever.refresh_index()` every `rl.index_refresh_interval` steps.
 
-### Dual-Index Design (Training vs Eval)
+### Dual-Index Design (Training vs Final Eval)
 
 **Training** uses the CSN FAISS index (built by `build_corpus.py`, 10k snippets). Each train step: CSN query → retrieve CSN snippets → LLM relevance reward → REINFORCE.
 
-**Eval** (every `eval_interval` steps) temporarily builds a fresh **HumanEval index** from canonical solutions using the current encoder weights, runs retrieval + generation + execution on the 164 HumanEval problems, then restores the CSN index.
+**Training eval** (every `eval_interval` steps) evaluates on a held-out CSN split using the same CSN index, computing `avg_snippet_relevance` via LLM judge — no code generation, no HumanEval.
+
+**Final eval** (`scripts/evaluate.py`, `scripts/compare_eval.py`) builds a fresh **HumanEval index** from canonical solutions, runs retrieval + generation + execution on the 164 HumanEval problems to measure pass@k. This is separate from the training loop.
 
 ### Training Data Flow
 
@@ -83,7 +90,7 @@ CodeSearchNet entry → DifferentiableRetriever.retrieve() [CSN index] → Retri
     → loss.backward() → optimizer.step() on CodeBERT only
 ```
 
-### Eval Data Flow
+### Final Eval Data Flow (HumanEval — separate from training loop)
 
 ```
 HumanEval problem → build HumanEval index (current encoder) → retrieve top-k
@@ -91,6 +98,8 @@ HumanEval problem → build HumanEval index (current encoder) → retrieve top-k
     → RewardFunction.compute() → batch_execute() → pass@k
     → RewardFunction.compute_snippet_rewards() → avg_snippet_relevance
 ```
+
+Note: This flow is used only by `scripts/evaluate.py` and `scripts/compare_eval.py`. During training, `RLTrainer.evaluate()` evaluates only on held-out CSN problems and measures `avg_snippet_relevance` without code generation.
 
 ### Key Modules
 
@@ -104,7 +113,7 @@ HumanEval problem → build HumanEval index (current encoder) → retrieve top-k
 
 - **`src/reward/executor.py`**: Runs generated code via `subprocess.run()` with a timeout. The test script is assembled as `function_code + "\n\n" + problem.test + f"\ncheck({entry_point})"`. Returns 1.0/0.0 binary.
 
-- **`src/rl/trainer.py`**: `RLTrainer.train_step()` processes a full batch, accumulates losses per problem, then calls `backward()` once on the mean. `evaluate()` swaps in a fresh HumanEval index, runs eval, then restores the CSN index. Index refresh, eval, and checkpointing are triggered by step count modulo config intervals.
+- **`src/rl/trainer.py`**: `RLTrainer.train_step()` processes a full batch, accumulates losses per problem, then calls `backward()` once on the mean. `evaluate()` computes `avg_snippet_relevance` on held-out CSN problems using the LLM judge (no code generation, no HumanEval). Index refresh, eval, and checkpointing are triggered by step count modulo config intervals.
 
 ### Config Overrides
 
