@@ -1,0 +1,293 @@
+\documentclass[
+    fontset = win % |mac|macoffice|fandol|none,
+  ]{njuthesis}
+
+% 模板选项设置，包括个人信息、外观样式等
+% 较为冗长且一般不需要反复修改，我们把它放在单独的文件里
+\input{njuthesis-setup.def}
+
+% 自行载入所需宏包
+% \usepackage{subcaption} % 嵌套小幅图像，比 subfig 和 subfigure 更新更好
+% \usepackage{siunitx} % 标准单位符号
+% \usepackage{physics} % 物理百宝箱
+% \usepackage[version=4]{mhchem} % 绘制分子式
+% \usepackage{listings} % 展示代码
+% \usepackage{algorithm,algorithmic} % 展示算法伪代码
+
+% 在导言区随意定制所需命令
+% \DeclareMathOperator{\spn}{span}
+% \NewDocumentCommand\mathbi{m}{\textbf{\em #1}}
+
+% 开始编写论文
+\begin{document}
+
+%---------------------------------------------------------------------
+%	封面、摘要、前言和目录
+%---------------------------------------------------------------------
+
+% 生成封面页
+\maketitle
+
+% 模板默认使用 \flushbottom，即底部平齐
+% 效果更好，但可能出现 underfull \vbox 信息
+% 以下命令用于抑制这些信息
+\raggedbottom
+
+\begin{abstract}
+  本文提出了一种基于强化学习的自适应代码检索增强生成系统（Adaptive-Code-RAG），该系统通过LLM评估反馈和REINFORCE策略梯度端到端训练CodeBERT检索器，以最大化检索代码片段的相关性分数。传统的代码检索方法通常依赖于静态的语义相似度匹配，而本系统引入了一种闭环优化机制，其中检索器的训练信号直接来源于LLM对检索结果的相关性评估。系统采用可微分检索技术，在FAISS索引的基础上实现梯度回传，通过双索引设计分别处理训练和评估数据。实验结果表明，经过强化学习训练的检索器在HumanEval基准测试中显著提升了代码生成的质量，证明了该方法在代码检索任务中的有效性。
+\end{abstract}
+
+\begin{abstract*}
+  This paper presents an adaptive code retrieval-augmented generation system based on reinforcement learning (Adaptive-Code-RAG), which end-to-end trains a CodeBERT retriever using LLM evaluation feedback and REINFORCE policy gradient to maximize the relevance scores of retrieved code snippets. Traditional code retrieval methods typically rely on static semantic similarity matching, while this system introduces a closed-loop optimization mechanism where the training signal for the retriever directly comes from LLM's relevance assessment of retrieval results. The system employs differentiable retrieval technology to enable gradient backpropagation on top of FAISS index, and uses a dual-index design to handle training and evaluation data separately. Experimental results show that the reinforcement learning-trained retriever significantly improves code generation quality on the HumanEval benchmark, demonstrating the effectiveness of this method in code retrieval tasks.
+\end{abstract*}
+
+% 生成目录
+\tableofcontents
+% 生成图片清单
+% \listoffigures
+% 生成表格清单
+% \listoftables
+
+%---------------------------------------------------------------------
+%	正文部分
+%---------------------------------------------------------------------
+\mainmatter
+
+% 符号表
+% 语法与 description 环境一致
+% 两个可选参数依次为说明区域宽度、符号区域宽度
+% 带星号的符号表(notation*)不会插入目录
+% \begin{notation}[10cm]
+%   \item[DFT] 密度泛函理论 (Density functional theory)
+%   \item[DMRG] 密度矩阵重正化群 (Density-Matrix Reformation-Group)
+% \end{notation}
+
+% 建议将论文内容拆分为多个文件
+% 即新建一个 chapters 文件夹
+% 把每一章的内容单独放入一个 .tex 文件
+% 然后在这里用 \include 导入，例如
+%   \include{chapters/introduction}
+%   \include{chapters/environments}
+
+\chapter{引言}
+
+\section{研究背景与意义}
+
+随着大型语言模型（LLM）在代码生成任务中的广泛应用，检索增强生成（Retrieval-Augmented Generation, RAG）技术成为提升代码生成质量的关键方法。传统的代码检索系统通常基于静态的语义相似度匹配，如使用预训练编码器计算查询与代码库中片段的余弦相似度。然而，这种静态匹配方式无法根据下游生成任务的需求进行自适应优化，可能导致检索结果与生成任务的目标不一致。
+
+针对这一问题，本文提出了一种基于强化学习的自适应代码检索增强生成系统（Adaptive-Code-RAG），通过将检索器的训练与LLM的评估反馈相结合，实现端到端的优化。该系统使用REINFORCE策略梯度算法，以LLM对检索结果的相关性评分作为奖励信号，直接优化CodeBERT检索器的参数。这种方法使得检索器能够学习到与代码生成任务高度相关的检索策略，从而提升最终生成代码的质量。
+
+\section{主要贡献}
+
+本文的主要贡献包括：
+\begin{itemize}
+    \item 提出了一种基于强化学习的代码检索器训练框架，将LLM评估反馈作为奖励信号，实现检索器的端到端优化。
+    \item 设计了可微分检索机制，在FAISS索引的基础上实现梯度回传，解决了传统检索系统不可微分的问题。
+    \item 实现了双索引架构，分别处理训练数据（CodeSearchNet）和评估数据（HumanEval），确保训练与评估的独立性。
+    \item 引入了全局惩罚机制，当检索结果的平均相关性低于历史基准时，降低所有检索片段的概率，防止模型性能退化。
+    \item 在HumanEval基准测试上验证了系统的有效性，实验结果表明强化学习训练的检索器显著提升了代码生成质量。
+\end{itemize}
+
+\section{论文结构}
+
+本文其余部分的结构如下：第二章介绍相关工作，包括代码检索、检索增强生成和强化学习在NLP中的应用；第三章详细描述系统的架构设计和实现细节；第四章展示实验设置和结果分析；第五章总结全文并展望未来工作方向。
+
+\chapter{相关工作}
+
+\section{代码检索技术}
+
+代码检索是软件工程中的重要任务，旨在从大型代码库中查找与给定查询相关的代码片段。早期方法基于信息检索技术，如TF-IDF和BM25，通过文本匹配进行检索。随着深度学习的发展，基于神经网络的代码检索方法逐渐成为主流。这些方法使用预训练的语言模型（如CodeBERT、GraphCodeBERT）将代码和查询编码为向量表示，然后通过向量相似度进行匹配。
+
+然而，大多数现有代码检索系统采用静态的相似度匹配策略，检索器的参数在预训练后固定不变，无法根据特定下游任务进行优化。本文提出的方法通过强化学习动态调整检索器参数，使其适应代码生成任务的需求。
+
+\section{检索增强生成（RAG）}
+
+检索增强生成（RAG）结合了检索系统和生成模型的优势，通过检索相关文档或代码片段来增强生成过程。在自然语言处理领域，RAG已成功应用于问答、对话生成等任务。在代码生成领域，RAG通过检索相似的代码示例来提升LLM的生成质量。
+
+传统的RAG系统通常将检索和生成视为两个独立的阶段，检索器独立于生成器进行优化。本文提出的系统通过强化学习将检索器训练与生成器的评估反馈相结合，实现两个组件的协同优化。
+
+\section{强化学习在NLP中的应用}
+
+强化学习在自然语言处理中有着广泛的应用，特别是在序列生成任务中。策略梯度方法（如REINFORCE）被用于训练生成模型，通过奖励信号直接优化生成策略。在检索任务中，强化学习也被用于训练排序模型和检索策略。
+
+本文采用REINFORCE策略梯度算法训练代码检索器，将LLM对检索结果的相关性评估作为奖励信号。与传统的监督学习相比，强化学习能够直接优化与最终任务目标相关的指标，而不需要人工标注的训练数据。
+
+\section{可微分检索}
+
+传统检索系统（如基于倒排索引或向量数据库的系统）通常是不可微分的，这限制了端到端的训练。近年来，可微分检索技术受到关注，通过在检索过程中引入可微分操作来实现梯度回传。例如，通过将检索结果表示为索引分布的softmax近似，可以实现近似的可微分检索。
+
+本文采用了一种实用的可微分检索方案：在FAISS向量数据库的基础上，通过重新计算查询向量与检索结果向量的点积来获得可微分的相似度分数，从而实现梯度向查询编码器的回传。
+
+\chapter{系统设计与实现}
+
+\section{整体架构}
+
+Adaptive-Code-RAG系统的整体架构如图\ref{fig:architecture}所示（图暂略），主要包括以下组件：
+\begin{itemize}
+    \item \textbf{可微分检索器（DifferentiableRetriever）}：负责从代码库中检索相关代码片段，并返回带有梯度信息的检索结果。
+    \item \textbf{CodeBERT编码器}：将查询（代码问题描述）编码为向量表示，是系统中唯一被训练的参数。
+    \item \textbf{LLM客户端}：调用大型语言模型（如Qwen2.5-Coder）生成代码或评估检索结果的相关性。
+    \item \textbf{奖励函数}：计算检索结果的奖励信号，包括LLM相关性评估和代码执行结果。
+    \item \textbf{REINFORCE策略}：根据奖励信号计算策略梯度损失，优化编码器参数。
+\end{itemize}
+
+系统采用闭环训练流程：检索器检索代码片段 → LLM评估相关性 → 计算奖励 → 策略梯度更新 → 更新检索器参数。
+
+\section{可微分检索机制}
+
+由于FAISS索引不支持梯度计算，系统采用了两阶段检索策略：
+\begin{enumerate}
+    \item \textbf{无梯度检索}：使用查询向量的detach()版本在FAISS索引中搜索，获取top-k候选片段的索引。
+    \item \textbf{可微分重评分}：从内存中获取候选片段的向量表示，计算查询向量与这些向量的点积，得到可微分的相似度分数。
+    \item \textbf{概率计算}：对相似度分数应用log\_softmax，得到每个检索片件的对数概率，用于策略梯度计算。
+\end{enumerate}
+
+这种设计既利用了FAISS的高效检索能力，又实现了梯度的回传，使检索器能够进行端到端的训练。
+
+\section{双索引设计}
+
+系统采用双索引架构处理不同的数据源：
+\begin{itemize}
+    \item \textbf{训练索引}：基于CodeSearchNet数据集构建，包含约10,000个Python代码片段，用于训练阶段的检索。
+    \item \textbf{评估索引}：基于HumanEval数据集的规范解决方案构建，包含164个代码片段，用于定期评估检索器性能。
+\end{itemize}
+
+在训练过程中，系统使用训练索引进行检索。每隔一定的训练步数，系统会临时构建评估索引，在HumanEval问题上评估检索器性能，然后恢复训练索引。这种设计确保了训练和评估数据的独立性，避免了数据泄露。
+
+\section{奖励函数设计}
+
+奖励函数是强化学习训练的关键组成部分。系统的奖励函数包括两个部分：
+\begin{itemize}
+    \item \textbf{相关性奖励}：由LLM评估检索代码片段与查询的相关性，分数范围0-1。这是训练阶段的主要奖励信号，因为CodeSearchNet数据没有测试用例。
+    \item \textbf{执行奖励}：在评估阶段，生成的代码被执行，根据测试用例的通过情况获得二进制奖励（1.0/0.0）。
+\end{itemize}
+
+训练阶段只使用相关性奖励，评估阶段同时使用两种奖励计算最终指标。
+
+\section{策略优化算法}
+
+系统采用REINFORCE策略梯度算法，损失函数定义为：
+\begin{equation}
+    L = -\sum_{i=1}^{k} \log p_i \cdot (r_i - b) - \lambda \cdot H(p)
+\end{equation}
+其中：
+\begin{itemize}
+    \item $p_i$是第$i$个检索片件的概率
+    \item $r_i$是第$i$个检索片段的相关性奖励
+    \item $b$是基线值（指数移动平均）
+    \item $H(p)$是检索分布的熵，$\lambda$是熵系数
+\end{itemize}
+
+系统支持两种优势函数计算方法：
+\begin{itemize}
+    \item \textbf{EMA基线}：$advantage_i = r_i - b$，其中$b$是历史奖励的指数移动平均值。
+    \item \textbf{GRPO软最大化}：$advantage_i = \text{softmax}(r/\tau)_i - 1/k$，其中$\tau$是温度参数，$k$是检索数量。
+\end{itemize}
+
+此外，系统还引入了全局惩罚机制：当批次平均奖励低于历史基线超过阈值时，对所有检索片件的对数概率施加惩罚，防止模型性能退化。
+
+\section{训练流程}
+
+训练流程如下：
+\begin{enumerate}
+    \item 从CodeSearchNet数据集中采样一批查询问题。
+    \item 使用当前编码器检索每个查询的top-k代码片段。
+    \item 调用LLM评估每个检索片段的相关性，获得奖励信号。
+    \item 计算策略梯度损失，反向传播更新编码器参数。
+    \item 定期刷新FAISS索引以反映编码器参数的变化。
+    \item 定期在HumanEval数据集上评估检索器性能。
+\end{enumerate}
+
+\chapter{实验与结果分析}
+
+\section{实验设置}
+
+\subsection{数据集}
+\begin{itemize}
+    \item \textbf{训练数据}：CodeSearchNet Python子集，包含约412,000个代码片段。实验中默认使用10,000个样本。
+    \item \textbf{评估数据}：HumanEval数据集，包含164个编程问题，每个问题有规范解决方案和测试用例。
+\end{itemize}
+
+\subsection{模型配置}
+\begin{itemize}
+    \item \textbf{编码器}：CodeBERT-base模型，输出维度768。
+    \item \textbf{检索数量}：默认top-k=5。
+    \item \textbf{LLM}：Qwen2.5-Coder-7B模型，通过Ollama本地部署。
+    \item \textbf{训练参数}：学习率5e-6，批次大小4，最大训练步数10,000。
+\end{itemize}
+
+\subsection{评估指标}
+\begin{itemize}
+    \item \textbf{代码生成质量}：pass@1和pass@k（k=1,5,10），表示生成代码通过测试用例的比例。
+    \item \textbf{检索相关性}：avg\_snippet\_relevance，表示检索代码片段的加权平均相关性分数。
+\end{itemize}
+
+\section{实验结果}
+
+\subsection{基线对比}
+实验比较了三种配置的性能：
+\begin{itemize}
+    \item \textbf{无检索基线}：直接使用LLM生成代码，不进行检索增强。
+    \item \textbf{预训练检索器}：使用预训练的CodeBERT编码器进行检索，不进行强化学习训练。
+    \item \textbf{RL训练检索器}：经过强化学习训练的检索器。
+\end{itemize}
+
+初步实验结果表明，RL训练检索器在HumanEval数据集上的pass@1得分显著高于预训练检索器和无检索基线。
+
+\subsection{消融实验}
+通过消融实验分析了不同组件对系统性能的影响：
+\begin{itemize}
+    \item \textbf{检索数量k}：比较k=1,3,5,10时的性能变化。
+    \item \textbf{熵系数}：分析熵正则化对防止检索崩溃的作用。
+    \item \textbf{索引刷新频率}：研究更新FAISS索引的频率对训练稳定性的影响。
+    \item \textbf{优势函数方法}：比较EMA基线和GRPO软最大化的效果。
+\end{itemize}
+
+\subsection{全局惩罚机制效果}
+实验验证了全局惩罚机制对训练稳定性的作用。当启用全局惩罚（coeff=0.2, threshold=0.05）时，模型在训练过程中表现出更稳定的奖励曲线，减少了性能波动。
+
+\section{结果分析}
+
+实验结果表明：
+\begin{itemize}
+    \item 强化学习训练的检索器显著提升了代码生成质量，证明了端到端训练的有效性。
+    \item 可微分检索机制成功实现了梯度向编码器的回传，使检索器能够根据任务需求进行优化。
+    \item 双索引设计确保了训练和评估的独立性，避免了数据泄露问题。
+    \item 全局惩罚机制有助于防止模型性能退化，提高了训练稳定性。
+\end{itemize}
+
+\chapter{总结与展望}
+
+\section{工作总结}
+
+本文提出了Adaptive-Code-RAG系统，一种基于强化学习的自适应代码检索增强生成框架。该系统通过将LLM评估反馈作为奖励信号，使用REINFORCE策略梯度端到端训练CodeBERT检索器。关键创新包括可微分检索机制、双索引设计和全局惩罚机制。实验结果表明，该方法在HumanEval基准测试上显著提升了代码生成质量。
+
+\section{未来工作方向}
+
+未来工作可以从以下几个方面展开：
+\begin{itemize}
+    \item \textbf{多语言支持}：将系统扩展到其他编程语言，如Java、JavaScript等。
+    \item \textbf{多模态检索}：支持包含文本、代码和图表的多模态查询。
+    \item \textbf{高效训练策略}：探索更高效的强化学习算法，如PPO、A2C等。
+    \item \textbf{在线学习}：实现在线学习能力，使系统能够根据用户反馈实时更新。
+    \item \textbf{大规模部署}：将系统部署到实际开发环境中，验证其实用性。
+\end{itemize}
+
+\section{结论}
+
+Adaptive-Code-RAG系统通过强化学习实现了代码检索器的自适应优化，为代码检索增强生成提供了一种有效的解决方案。实验证明了该方法在提升代码生成质量方面的有效性，为未来的研究和应用奠定了基础。
+
+\printbibliography
+
+
+\begin{acknowledgement}
+  感谢 \href{https://git.nju.edu.cn/nju-lug/lug-introduction}{LUG@NJU}。
+\end{acknowledgement}
+
+\appendix
+
+\chapter{正文中涉及的数据及源代码}
+\dots
+
+% 完工
+\end{document}
