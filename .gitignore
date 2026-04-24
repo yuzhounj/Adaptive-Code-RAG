@@ -12,7 +12,7 @@ wandb/
 .idea/
 /graduate/
 /figures/
-
+/ablation/
 .DS_Store
 **/.DS_Store
 .DS_Store?
