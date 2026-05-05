@@ -12,13 +12,13 @@ generator:
   temperature: 0.8
   max_tokens: 512
   timeout: 60
-  max_concurrency: 1
+  max_concurrency: 4
 
 reward:
   execution_timeout: 10
   relevance_model: "ollama/qwen2.5-coder:14b"
   relevance_api_base: "http://localhost:11434"
-  max_concurrency: 1
+  max_concurrency: 4
 
 rl:
   learning_rate: 5.0e-6
